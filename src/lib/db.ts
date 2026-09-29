@@ -155,6 +155,24 @@ const SEED_VERBS = [
   "eating",
 ];
 
+const EXTRA_VERBS = [
+  "wanking",
+  "threatening",
+  "stabbing",
+  "loving",
+  "kissing",
+  "spanking",
+  "hugging",
+  "spooning",
+  "licking",
+  "mclovin",
+  "blazing",
+  "chewing",
+  "eating",
+  "chowing",
+  "slapping",
+];
+
 const EXTRA_NOUNS = [
   "gooch",
   "dog",
@@ -214,6 +232,7 @@ function migrateVerbBank(db: Database.Database) {
   for (const word of DROPPED_ADJECTIVES) drop.run(word);
   db.prepare("UPDATE caption_words SET bank = 'verb' WHERE bank = 'adjective'").run();
   insertMissingWords(db, "verb", SEED_VERBS);
+  insertMissingWords(db, "verb", EXTRA_VERBS);
   insertMissingWords(db, "noun", EXTRA_NOUNS);
 }
 
