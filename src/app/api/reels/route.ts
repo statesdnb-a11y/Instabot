@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CaptionError } from "@/lib/captions";
 import { DeskError, deskPayload } from "@/lib/desk";
 import { bootQueue, fillQueue } from "@/lib/queue";
 
@@ -35,7 +36,9 @@ export async function POST(request: Request) {
     }
     return json(deskPayload());
   } catch (error) {
-    if (error instanceof DeskError) return json({ error: error.message }, error.status);
+    if (error instanceof DeskError || error instanceof CaptionError) {
+      return json({ error: error.message }, error.status);
+    }
     const message = error instanceof Error ? error.message : "Could not generate a reel.";
     return json({ error: message }, 500);
   }

@@ -101,7 +101,78 @@ function openDatabase() {
     );
     INSERT OR IGNORE INTO schedule (id, next_publish_at) VALUES (1, NULL);
   `);
+  const hadCaptions = db
+    .prepare("SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = 'caption_templates'")
+    .get();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS caption_templates (
+      id TEXT PRIMARY KEY,
+      body TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS caption_words (
+      id TEXT PRIMARY KEY,
+      bank TEXT NOT NULL,
+      word TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+  `);
+  if (!hadCaptions) seedCaptionWords(db);
+  ensureSeedTemplates(db);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS used_captions (
+      caption_key TEXT PRIMARY KEY
+    );
+  `);
   return db;
+}
+
+const SEED_TEMPLATES = [
+  "me when I melt {him/her}",
+  "thinking of chewing {him/her}",
+  "this bitch got me steady {adjective}",
+  "i need to itch my asshole",
+  "{he/she} dont know im {adjective}",
+  "got my hands up {his/her} {noun}",
+  "i wonder if {he/she} {adjective}",
+  "i been using your shampoo",
+  "i been drinking your fancy soap",
+  "im {adjective} your panties",
+  "you make me hungry",
+];
+
+const SEED_ADJECTIVES = ["nasty", "feral", "sick", "gone", "stupid", "pressed", "unhinged", "down bad"];
+
+const SEED_NOUNS = ["problem", "threat", "meal", "habit", "crashout", "situation"];
+
+function seedCaptionWords(db: Database.Database) {
+  const word = db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)");
+  const insert = db.transaction(() => {
+    SEED_ADJECTIVES.forEach((value, index) => word.run(crypto.randomUUID(), "adjective", value, index));
+    SEED_NOUNS.forEach((value, index) => word.run(crypto.randomUUID(), "noun", value, index));
+  });
+  insert();
+}
+
+function ensureSeedTemplates(db: Database.Database) {
+  const existing = db.prepare("SELECT id, body FROM caption_templates").all() as { id: string; body: string }[];
+  const byBody = new Map(existing.map((row) => [row.body, row]));
+  const insert = db.prepare("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)");
+  const updatePos = db.prepare("UPDATE caption_templates SET position = ? WHERE id = ?");
+  const seedSet = new Set(SEED_TEMPLATES);
+  const sync = db.transaction(() => {
+    SEED_TEMPLATES.forEach((body, index) => {
+      const row = byBody.get(body);
+      if (!row) insert.run(crypto.randomUUID(), body, index);
+      else updatePos.run(index, row.id);
+    });
+    let position = SEED_TEMPLATES.length;
+    for (const row of existing) {
+      if (!seedSet.has(row.body)) updatePos.run(position, row.id);
+      position += seedSet.has(row.body) ? 0 : 1;
+    }
+  });
+  sync();
 }
 
 export function getDb() {

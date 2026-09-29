@@ -1,6 +1,6 @@
 # Instabot
 
-A personal Instagram Reels desk. You only approve. The app picks a two-person still, writes one fake-deep relationship line, and cuts a short silent vertical reel. Instagram attaches a track from its licensed catalog when you post. Approving posts it when the professional account is connected, and still keeps the file when it is not.
+A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short silent vertical reel. Instagram attaches a track from its licensed catalog when a send slot fires.
 
 ## Run it
 
@@ -38,7 +38,7 @@ Each draft shows the chosen track’s title, artist, and artwork once a catalog 
 
 The queue lives in `data/instabot.db` (SQLite). Rendered mp4s live in `data/renders/` and are not committed. Stills in `data/photos` are.
 
-Lines live in `src/lib/voice.ts`. Replace `SEEDED_LINES` when you want the desk to sound like a specific set of captions.
+Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{adjective}`, `{him/her}`, `{he/she}`, and `{his/her}`. The noun and adjective banks are edited there too. **New line** and new drafts use that system, and they skip a caption that was already published, is on Approved, or is already on another draft. Saving a custom line keeps that exact line on the reel, files a template, and marks the card **Used before** when that caption collides. Approving remembers the final caption even after the reel is deleted. Pronouns in a typed line become `{he/she}`, `{him/her}`, or `{his/her}`, and a part-of-speech tagger turns nouns and adjectives into blanks and bank words. Click a noun or adjective blank to flip it. Seeded templates are not re-analyzed.
 
 ## Environment
 

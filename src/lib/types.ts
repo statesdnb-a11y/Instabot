@@ -21,6 +21,7 @@ export type ReelDTO = {
   line: string;
   caption: string;
   captionCustom: boolean;
+  usedBefore: boolean;
   photo: {
     id: string;
     author: string;

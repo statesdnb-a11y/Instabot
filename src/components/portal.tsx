@@ -142,9 +142,12 @@ export function Portal({ initial }: { initial: DeskPayload }) {
           <Badge variant="outline">
             {payload?.instagramConnected ? "Instagram connected" : "Instagram not connected"}
           </Badge>
-          <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
-            {generating ? "Generating…" : "Generate"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <CaptionEditor />
+            <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
+              {generating ? "Generating…" : "Generate"}
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -318,6 +321,7 @@ function ReelCard({
 
       <div className="flex min-w-0 flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
+          {reel.usedBefore ? <Badge>Used before</Badge> : null}
           <Badge variant="secondary">{motionLabel(reel.motion)}</Badge>
           <Badge variant="outline">{reel.durationSec}s</Badge>
           {reel.status === "approved" && sendsAt ? (
@@ -666,5 +670,219 @@ function EditLine({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type CaptionEntry = { id: string; text: string };
+type CaptionDesk = { templates: CaptionEntry[]; nouns: CaptionEntry[]; adjectives: CaptionEntry[] };
+
+function CaptionEditor() {
+  const [open, setOpen] = useState(false);
+  const [desk, setDesk] = useState<CaptionDesk | null>(null);
+  const [template, setTemplate] = useState("");
+  const [noun, setNoun] = useState("");
+  const [adjective, setAdjective] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function loadDesk() {
+    const response = await fetch("/api/captions", { cache: "no-store" });
+    const data = (await response.json().catch(() => ({}))) as CaptionDesk & { error?: string };
+    if (!response.ok) throw new Error(data.error || "The captions could not load.");
+    setDesk(data);
+    setError(null);
+  }
+
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) return;
+    void loadDesk().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "The captions could not load.");
+    });
+  }
+
+  async function send(body: Record<string, unknown>, clear: () => void) {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/captions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await response.json().catch(() => ({}))) as CaptionDesk & { error?: string };
+      if (!response.ok) throw new Error(data.error || "That didn't take.");
+      setDesk(data);
+      clear();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't take.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <Button variant="outline" className="h-11" onClick={() => onOpenChange(true)}>
+        Captions
+      </Button>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Caption templates</DialogTitle>
+          <DialogDescription>
+            New drafts and New line fill these in. {"{noun}"} and {"{adjective}"} come from the banks.{" "}
+            {"{him/her}"} picks him or her. {"{he/she}"} picks he or she. {"{his/her}"} picks his or her.
+            Saving a custom line keeps that
+            exact line on the reel and adds a template here. Click a noun or adjective blank to flip it.
+          </DialogDescription>
+        </DialogHeader>
+        <CaptionGroup
+          label="Templates"
+          placeholder="Add a template"
+          value={template}
+          entries={desk?.templates ?? []}
+          busy={busy || !desk}
+          blanks
+          onChange={setTemplate}
+          onAdd={() => void send({ action: "add-template", text: template }, () => setTemplate(""))}
+          onDelete={(id) => void send({ action: "delete-template", id }, () => undefined)}
+          onFlipBlank={(id, index) => void send({ action: "flip-blank", id, index }, () => undefined)}
+        />
+        <CaptionGroup
+          label="Adjectives"
+          placeholder="Add an adjective"
+          value={adjective}
+          entries={desk?.adjectives ?? []}
+          busy={busy || !desk}
+          onChange={setAdjective}
+          onAdd={() =>
+            void send({ action: "add-word", bank: "adjective", text: adjective }, () => setAdjective(""))
+          }
+          onDelete={(id) => void send({ action: "delete-word", id }, () => undefined)}
+          onFlipWord={(id) => void send({ action: "flip-word", id }, () => undefined)}
+        />
+        <CaptionGroup
+          label="Nouns"
+          placeholder="Add a noun"
+          value={noun}
+          entries={desk?.nouns ?? []}
+          busy={busy || !desk}
+          onChange={setNoun}
+          onAdd={() => void send({ action: "add-word", bank: "noun", text: noun }, () => setNoun(""))}
+          onDelete={(id) => void send({ action: "delete-word", id }, () => undefined)}
+          onFlipWord={(id) => void send({ action: "flip-word", id }, () => undefined)}
+        />
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CaptionGroup({
+  label,
+  placeholder,
+  value,
+  entries,
+  busy,
+  blanks = false,
+  onChange,
+  onAdd,
+  onDelete,
+  onFlipBlank,
+  onFlipWord,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  entries: CaptionEntry[];
+  busy: boolean;
+  blanks?: boolean;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+  onFlipBlank?: (id: string, index: number) => void;
+  onFlipWord?: (id: string) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label>{label}</Label>
+      {entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing here yet.</p>
+      ) : (
+        <ul className="grid gap-1">
+          {entries.map((entry) => (
+            <li key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+              {blanks ? (
+                <TemplateText text={entry.text} disabled={busy} onFlip={(index) => onFlipBlank?.(entry.id, index)} />
+              ) : (
+                <span className="min-w-0 text-sm">{entry.text}</span>
+              )}
+              <span className="flex shrink-0 gap-1">
+                {onFlipWord ? (
+                  <Button variant="ghost" className="h-9" disabled={busy} onClick={() => onFlipWord(entry.id)}>
+                    Flip
+                  </Button>
+                ) : null}
+                <Button variant="ghost" className="h-9" disabled={busy} onClick={() => onDelete(entry.id)}>
+                  Delete
+                </Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={value}
+          placeholder={placeholder}
+          className="h-11"
+          disabled={busy}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onAdd();
+          }}
+        />
+        <Button variant="outline" className="h-11" disabled={busy || !value.trim()} onClick={onAdd}>
+          Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TemplateText({
+  text,
+  disabled,
+  onFlip,
+}: {
+  text: string;
+  disabled: boolean;
+  onFlip: (index: number) => void;
+}) {
+  const parts = text.split(/(\{(?:noun|adjective)\})/g);
+  const rendered = parts.reduce<{ part: string; tokenIndex: number | null }[]>((items, part) => {
+    if (part !== "{noun}" && part !== "{adjective}") return [...items, { part, tokenIndex: null }];
+    const tokenIndex = items.filter((item) => item.tokenIndex !== null).length;
+    return [...items, { part, tokenIndex }];
+  }, []);
+  return (
+    <span className="min-w-0 text-sm">
+      {rendered.map((item, index) => {
+        if (item.tokenIndex === null) return <span key={index}>{item.part}</span>;
+        const next = item.part === "{noun}" ? "adjective" : "noun";
+        return (
+          <button
+            key={index}
+            type="button"
+            className="underline decoration-dotted underline-offset-4"
+            disabled={disabled}
+            onClick={() => onFlip(item.tokenIndex as number)}
+          >
+            <span className="sr-only">Flip to {next}: </span>
+            {item.part}
+          </button>
+        );
+      })}
+    </span>
   );
 }

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
 import { getNextPublishAt, getReel, listReels, patchReel, videoExists, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { armScheduler } from "@/lib/schedule";
@@ -36,6 +37,7 @@ export function toReelDTO(row: ReelRow): ReelDTO {
     line: row.line,
     caption: row.caption,
     captionCustom: row.caption_custom === 1,
+    usedBefore: captionUsedOnCard(row.id, row.status, row.caption),
     photo: {
       id: row.photo_id,
       author: row.photo_author,
@@ -111,7 +113,10 @@ export function updateDraft(
     caption_custom: captionCustom ? 1 : 0,
     updated_at: Date.now(),
   });
-  if (lineChanged) markForRender(id);
+  if (lineChanged) {
+    markForRender(id);
+    learnLine(line);
+  }
   const next = getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
@@ -206,6 +211,7 @@ export function approveReel(id: string) {
     throw new DeskError("This reel can't be approved from here.", 409);
   }
   assertReadyToPost(reel);
+  rememberCaption(reel.caption);
   const now = Date.now();
   patchReel(id, {
     status: "approved",

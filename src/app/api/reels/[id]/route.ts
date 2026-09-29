@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CaptionError } from "@/lib/captions";
 import {
   DeskError,
   approveReel,
@@ -58,7 +59,9 @@ export async function POST(
         return json({ error: "Unknown action." }, 400);
     }
   } catch (error) {
-    if (error instanceof DeskError) return json({ error: error.message }, error.status);
+    if (error instanceof DeskError || error instanceof CaptionError) {
+      return json({ error: error.message }, error.status);
+    }
     const message = error instanceof Error ? error.message : "The desk hit a snag.";
     return json({ error: message }, 500);
   }
