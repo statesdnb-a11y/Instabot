@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 
 const tagger = winkPosTagger();
 
-export type CaptionBank = "noun" | "adjective";
+export type CaptionBank = "noun" | "verb";
 
 export type CaptionEntry = {
   id: string;
@@ -13,7 +13,7 @@ export type CaptionEntry = {
 export type CaptionDesk = {
   templates: CaptionEntry[];
   nouns: CaptionEntry[];
-  adjectives: CaptionEntry[];
+  verbs: CaptionEntry[];
 };
 
 export class CaptionError extends Error {
@@ -24,9 +24,9 @@ export class CaptionError extends Error {
   }
 }
 
-const TOKEN = /\{(noun|adjective|him\/her|he\/she|his\/her)\}/g;
-const BLANK = /\{(noun|adjective)\}/g;
-const PIECE = /\{(?:noun|adjective|him\/her|he\/she|his\/her)\}|[A-Za-z]+(?:'[A-Za-z]+)?|\s+|./g;
+const TOKEN = /\{(noun|verb|him\/her|he\/she|his\/her)\}/g;
+const BLANK = /\{(noun|verb)\}/g;
+const PIECE = /\{(?:noun|verb|him\/her|he\/she|his\/her)\}|[A-Za-z]+(?:'[A-Za-z]+)?|\s+|./g;
 const WORD = /^[A-Za-z]+(?:'[A-Za-z]+)?$/;
 const MAX_TEMPLATE = 220;
 const MAX_WORD = 48;
@@ -72,7 +72,7 @@ export function captionDesk(): CaptionDesk {
   return {
     templates,
     nouns: words.filter((word) => word.bank === "noun").map(({ id, text }) => ({ id, text })),
-    adjectives: words.filter((word) => word.bank === "adjective").map(({ id, text }) => ({ id, text })),
+    verbs: words.filter((word) => word.bank === "verb").map(({ id, text }) => ({ id, text })),
   };
 }
 
@@ -96,7 +96,7 @@ export function deleteTemplate(id: unknown) {
 }
 
 export function addWord(bank: unknown, value: unknown) {
-  if (bank !== "noun" && bank !== "adjective") throw new CaptionError("Pick the noun or adjective bank.");
+  if (bank !== "noun" && bank !== "verb") throw new CaptionError("Pick the noun or verb bank.");
   const text = clean(value, MAX_WORD, "A word");
   const db = getDb();
   const existing = db
@@ -139,7 +139,7 @@ export function flipBlank(id: unknown, index: unknown) {
     }
     seen += 1;
     flipped = true;
-    return token === "{noun}" ? "{adjective}" : "{noun}";
+    return token === "{noun}" ? "{verb}" : "{noun}";
   });
   if (!flipped) throw new CaptionError("That blank is missing.");
   db.prepare("UPDATE caption_templates SET body = ? WHERE id = ?").run(body, id);
@@ -153,7 +153,7 @@ export function flipWord(id: unknown) {
     | { id: string; bank: CaptionBank; word: string }
     | undefined;
   if (!row) throw new CaptionError("That word is already gone.", 404);
-  const nextBank: CaptionBank = row.bank === "noun" ? "adjective" : "noun";
+  const nextBank: CaptionBank = row.bank === "noun" ? "verb" : "noun";
   const duplicate = db
     .prepare("SELECT id FROM caption_words WHERE bank = ? AND word = ?")
     .get(nextBank, row.word) as { id: string } | undefined;
@@ -267,17 +267,17 @@ export function captionUsedOnCard(id: string, status: string, caption: string) {
   return Boolean(remembered);
 }
 
-function slotForWord(word: string, pos: string, nouns: Set<string>, adjectives: Set<string>) {
+function slotForWord(word: string, pos: string, nouns: Set<string>, verbs: Set<string>) {
   const lower = word.toLowerCase();
   if (lower === "he" || lower === "she") return "{he/she}";
   if (lower === "him" || lower === "her") return "{him/her}";
   if (lower === "his") return "{his/her}";
   if (CLOSED.has(lower)) return word;
-  if (adjectives.has(lower)) return "{adjective}";
+  if (verbs.has(lower)) return "{verb}";
   if (nouns.has(lower)) return "{noun}";
-  if (pos.startsWith("JJ")) {
-    rememberWord("adjective", lower, adjectives);
-    return "{adjective}";
+  if (pos.startsWith("VB")) {
+    rememberWord("verb", lower, verbs);
+    return "{verb}";
   }
   if (pos.startsWith("NN")) {
     rememberWord("noun", lower, nouns);
@@ -292,7 +292,7 @@ export function learnLine(line: string) {
   const poses = posesForWords(words);
   const desk = captionDesk();
   const nouns = new Set(desk.nouns.map((entry) => entry.text.toLowerCase()));
-  const adjectives = new Set(desk.adjectives.map((entry) => entry.text.toLowerCase()));
+  const verbs = new Set(desk.verbs.map((entry) => entry.text.toLowerCase()));
   let wordIndex = 0;
   const body = pieces
     .map((piece) => {
@@ -300,28 +300,28 @@ export function learnLine(line: string) {
       if (!WORD.test(piece)) return piece;
       const pos = poses[wordIndex] ?? "";
       wordIndex += 1;
-      return slotForWord(piece, pos, nouns, adjectives);
+      return slotForWord(piece, pos, nouns, verbs);
     })
     .join("");
   rememberTemplate(body);
 }
 
-function tokenChoices(token: string, nouns: string[], adjectives: string[]) {
+function tokenChoices(token: string, nouns: string[], verbs: string[]) {
   if (token === "{noun}") return nouns.length ? nouns : null;
-  if (token === "{adjective}") return adjectives.length ? adjectives : null;
+  if (token === "{verb}") return verbs.length ? verbs : null;
   if (token === "{he/she}") return ["he", "she"];
   if (token === "{him/her}") return ["him", "her"];
   if (token === "{his/her}") return ["his", "her"];
   return null;
 }
 
-function* fillsOf(template: string, nouns: string[], adjectives: string[]) {
+function* fillsOf(template: string, nouns: string[], verbs: string[]) {
   const tokens = template.match(new RegExp(TOKEN.source, "g")) ?? [];
   if (tokens.length === 0) {
     yield template;
     return;
   }
-  const options = tokens.map((token) => tokenChoices(token, nouns, adjectives));
+  const options = tokens.map((token) => tokenChoices(token, nouns, verbs));
   if (options.some((option) => !option)) return;
   const lists = options as string[][];
   const total = lists.reduce((count, list) => count * list.length, 1);
@@ -346,7 +346,7 @@ export function nextLine(exclude: string[] = []) {
     throw new CaptionError("Add a caption template before generating a line.");
   }
   const nouns = desk.nouns.map((entry) => entry.text);
-  const adjectives = desk.adjectives.map((entry) => entry.text);
+  const verbs = desk.verbs.map((entry) => entry.text);
   const blocked = blockedCaptionKeys();
   for (const extra of exclude) {
     const key = captionKey(extra);
@@ -361,17 +361,17 @@ export function nextLine(exclude: string[] = []) {
   }
   let produced = false;
   for (const template of templates) {
-    for (const line of fillsOf(template.text, nouns, adjectives)) {
+    for (const line of fillsOf(template.text, nouns, verbs)) {
       produced = true;
       if (!blocked.has(captionKey(line))) return line;
     }
   }
   if (!produced) {
     const needsNoun = desk.templates.some((entry) => entry.text.includes("{noun}"));
-    const needsAdjective = desk.templates.some((entry) => entry.text.includes("{adjective}"));
+    const needsVerb = desk.templates.some((entry) => entry.text.includes("{verb}"));
     if (needsNoun && nouns.length === 0) throw new CaptionError("Add a noun. A template uses {noun}.");
-    if (needsAdjective && adjectives.length === 0) {
-      throw new CaptionError("Add an adjective. A template uses {adjective}.");
+    if (needsVerb && verbs.length === 0) {
+      throw new CaptionError("Add a verb. A template uses {verb}.");
     }
     throw new CaptionError("Those templates could not be filled.");
   }

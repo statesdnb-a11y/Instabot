@@ -674,14 +674,14 @@ function EditLine({
 }
 
 type CaptionEntry = { id: string; text: string };
-type CaptionDesk = { templates: CaptionEntry[]; nouns: CaptionEntry[]; adjectives: CaptionEntry[] };
+type CaptionDesk = { templates: CaptionEntry[]; nouns: CaptionEntry[]; verbs: CaptionEntry[] };
 
 function CaptionEditor() {
   const [open, setOpen] = useState(false);
   const [desk, setDesk] = useState<CaptionDesk | null>(null);
   const [template, setTemplate] = useState("");
   const [noun, setNoun] = useState("");
-  const [adjective, setAdjective] = useState("");
+  const [verb, setVerb] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -730,10 +730,9 @@ function CaptionEditor() {
         <DialogHeader>
           <DialogTitle>Caption templates</DialogTitle>
           <DialogDescription>
-            New drafts and New line fill these in. {"{noun}"} and {"{adjective}"} come from the banks.{" "}
+            New drafts and New line fill these in. {"{noun}"} and {"{verb}"} come from the banks.{" "}
             {"{him/her}"} picks him or her. {"{he/she}"} picks he or she. {"{his/her}"} picks his or her.
-            Saving a custom line keeps that
-            exact line on the reel and adds a template here. Click a noun or adjective blank to flip it.
+            Saving a custom line keeps that exact line on the reel and adds a template here. Click a noun or verb blank to flip it.
           </DialogDescription>
         </DialogHeader>
         <CaptionGroup
@@ -749,15 +748,13 @@ function CaptionEditor() {
           onFlipBlank={(id, index) => void send({ action: "flip-blank", id, index }, () => undefined)}
         />
         <CaptionGroup
-          label="Adjectives"
-          placeholder="Add an adjective"
-          value={adjective}
-          entries={desk?.adjectives ?? []}
+          label="Verbs"
+          placeholder="Add a verb"
+          value={verb}
+          entries={desk?.verbs ?? []}
           busy={busy || !desk}
-          onChange={setAdjective}
-          onAdd={() =>
-            void send({ action: "add-word", bank: "adjective", text: adjective }, () => setAdjective(""))
-          }
+          onChange={setVerb}
+          onAdd={() => void send({ action: "add-word", bank: "verb", text: verb }, () => setVerb(""))}
           onDelete={(id) => void send({ action: "delete-word", id }, () => undefined)}
           onFlipWord={(id) => void send({ action: "flip-word", id }, () => undefined)}
         />
@@ -859,9 +856,9 @@ function TemplateText({
   disabled: boolean;
   onFlip: (index: number) => void;
 }) {
-  const parts = text.split(/(\{(?:noun|adjective)\})/g);
+  const parts = text.split(/(\{(?:noun|verb)\})/g);
   const rendered = parts.reduce<{ part: string; tokenIndex: number | null }[]>((items, part) => {
-    if (part !== "{noun}" && part !== "{adjective}") return [...items, { part, tokenIndex: null }];
+    if (part !== "{noun}" && part !== "{verb}") return [...items, { part, tokenIndex: null }];
     const tokenIndex = items.filter((item) => item.tokenIndex !== null).length;
     return [...items, { part, tokenIndex }];
   }, []);
@@ -869,7 +866,7 @@ function TemplateText({
     <span className="min-w-0 text-sm">
       {rendered.map((item, index) => {
         if (item.tokenIndex === null) return <span key={index}>{item.part}</span>;
-        const next = item.part === "{noun}" ? "adjective" : "noun";
+        const next = item.part === "{noun}" ? "verb" : "noun";
         return (
           <button
             key={index}

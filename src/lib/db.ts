@@ -118,6 +118,7 @@ function openDatabase() {
     );
   `);
   if (!hadCaptions) seedCaptionWords(db);
+  migrateVerbBank(db);
   ensureSeedTemplates(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS used_captions (
@@ -130,28 +131,77 @@ function openDatabase() {
 const SEED_TEMPLATES = [
   "me when I melt {him/her}",
   "thinking of chewing {him/her}",
-  "this bitch got me steady {adjective}",
+  "this bitch got me steady {verb}",
   "i need to itch my asshole",
-  "{he/she} dont know im {adjective}",
+  "{he/she} dont know im {verb}",
   "got my hands up {his/her} {noun}",
-  "i wonder if {he/she} {adjective}",
+  "i wonder if {he/she} {verb}",
   "i been using your shampoo",
   "i been drinking your fancy soap",
-  "im {adjective} your panties",
+  "im {verb} your panties",
   "you make me hungry",
 ];
 
-const SEED_ADJECTIVES = ["nasty", "feral", "sick", "gone", "stupid", "pressed", "unhinged", "down bad"];
+const SEED_VERBS = [
+  "chewing",
+  "melting",
+  "itching",
+  "drinking",
+  "using",
+  "smelling",
+  "licking",
+  "stealing",
+  "wearing",
+  "eating",
+];
+
+const EXTRA_NOUNS = ["gooch", "dog", "teacher", "asshole", "genital", "peepee", "donger"];
+
+const DROPPED_ADJECTIVES = [
+  "nasty",
+  "feral",
+  "sick",
+  "gone",
+  "stupid",
+  "pressed",
+  "unhinged",
+  "down bad",
+  "steady",
+];
 
 const SEED_NOUNS = ["problem", "threat", "meal", "habit", "crashout", "situation"];
 
 function seedCaptionWords(db: Database.Database) {
   const word = db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)");
   const insert = db.transaction(() => {
-    SEED_ADJECTIVES.forEach((value, index) => word.run(crypto.randomUUID(), "adjective", value, index));
+    SEED_VERBS.forEach((value, index) => word.run(crypto.randomUUID(), "verb", value, index));
     SEED_NOUNS.forEach((value, index) => word.run(crypto.randomUUID(), "noun", value, index));
   });
   insert();
+}
+
+function insertMissingWords(db: Database.Database, bank: "noun" | "verb", words: string[]) {
+  const insert = db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)");
+  const exists = db.prepare("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?");
+  const maxPos = db.prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?");
+  const add = db.transaction(() => {
+    let position = (maxPos.get(bank) as { n: number }).n;
+    for (const word of words) {
+      if (exists.get(bank, word)) continue;
+      position += 1;
+      insert.run(crypto.randomUUID(), bank, word, position);
+    }
+  });
+  add();
+}
+
+function migrateVerbBank(db: Database.Database) {
+  db.prepare("UPDATE caption_templates SET body = replace(body, '{adjective}', '{verb}')").run();
+  const drop = db.prepare("DELETE FROM caption_words WHERE word = ?");
+  for (const word of DROPPED_ADJECTIVES) drop.run(word);
+  db.prepare("UPDATE caption_words SET bank = 'verb' WHERE bank = 'adjective'").run();
+  insertMissingWords(db, "verb", SEED_VERBS);
+  insertMissingWords(db, "noun", EXTRA_NOUNS);
 }
 
 function ensureSeedTemplates(db: Database.Database) {

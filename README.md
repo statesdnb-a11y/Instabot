@@ -38,7 +38,7 @@ Each draft shows the chosen track’s title, artist, and artwork once a catalog 
 
 The queue lives in `data/instabot.db` (SQLite). Rendered mp4s live in `data/renders/` and are not committed. Stills in `data/photos` are.
 
-Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{adjective}`, `{him/her}`, `{he/she}`, and `{his/her}`. The noun and adjective banks are edited there too. **New line** and new drafts use that system, and they skip a caption that was already published, is on Approved, or is already on another draft. Saving a custom line keeps that exact line on the reel, files a template, and marks the card **Used before** when that caption collides. Approving remembers the final caption even after the reel is deleted. Pronouns in a typed line become `{he/she}`, `{him/her}`, or `{his/her}`, and a part-of-speech tagger turns nouns and adjectives into blanks and bank words. Click a noun or adjective blank to flip it. Seeded templates are not re-analyzed.
+Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb}`, `{him/her}`, `{he/she}`, and `{his/her}`. The noun and verb banks are edited there too. **New line** and new drafts use that system, and they skip a caption that was already published, is on Approved, or is already on another draft. Saving a custom line keeps that exact line on the reel, files a template, and marks the card **Used before** when that caption collides. Approving remembers the final caption even after the reel is deleted. Pronouns in a typed line become `{he/she}`, `{him/her}`, or `{his/her}`, and a part-of-speech tagger turns nouns and verbs into blanks and bank words. Click a noun or verb blank to flip it. Seeded templates are not re-analyzed.
 
 ## Environment
 
