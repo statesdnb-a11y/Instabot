@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { DB_PATH, RENDER_DIR, ensureDataDirs } from "@/lib/paths";
+import { removeStoredVideo } from "@/lib/media";
+import { RENDER_DIR } from "@/lib/paths";
+import { openSql, tursoEnabled, type Sql } from "@/lib/sql";
 import type { Motion, PostState, ReelStatus, RenderStatus } from "@/lib/types";
 
 export type ReelRow = {
@@ -41,23 +42,20 @@ export type ReelRow = {
   posted_at: number | null;
 };
 
-const globalDb = globalThis as unknown as { instabotDb?: Database.Database };
+const globalDb = globalThis as unknown as { instabotSql?: Promise<Sql> };
 
-function openDatabase() {
-  ensureDataDirs();
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 5000");
-  const columns = db.prepare("PRAGMA table_info(reels)").all() as { name: string }[];
+async function openDatabase() {
+  const db = openSql();
+  const columns = await db.all<{ name: string }>("PRAGMA table_info(reels)");
   if (columns.length > 0 && !columns.some((column) => column.name === "audio_id")) {
-    db.exec("DROP TABLE reels");
-    if (fs.existsSync(RENDER_DIR)) {
+    await db.exec("DROP TABLE reels");
+    if (!tursoEnabled() && fs.existsSync(RENDER_DIR)) {
       for (const file of fs.readdirSync(RENDER_DIR)) {
         if (file.endsWith(".mp4")) fs.rmSync(path.join(RENDER_DIR, file), { force: true });
       }
     }
   }
-  db.exec(`
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS reels (
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL,
@@ -101,10 +99,10 @@ function openDatabase() {
     );
     INSERT OR IGNORE INTO schedule (id, next_publish_at) VALUES (1, NULL);
   `);
-  const hadCaptions = db
-    .prepare("SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = 'caption_templates'")
-    .get();
-  db.exec(`
+  const hadCaptions = await db.get(
+    "SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = 'caption_templates'",
+  );
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS caption_templates (
       id TEXT PRIMARY KEY,
       body TEXT NOT NULL,
@@ -117,10 +115,10 @@ function openDatabase() {
       position INTEGER NOT NULL
     );
   `);
-  if (!hadCaptions) seedCaptionWords(db);
-  migrateVerbBank(db);
-  ensureSeedTemplates(db);
-  db.exec(`
+  if (!hadCaptions) await seedCaptionWords(db);
+  await migrateVerbBank(db);
+  await ensureSeedTemplates(db);
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS used_captions (
       caption_key TEXT PRIMARY KEY
     );
@@ -202,179 +200,150 @@ const DROPPED_ADJECTIVES = [
 
 const SEED_NOUNS = ["problem", "threat", "meal", "habit", "crashout", "situation"];
 
-function seedCaptionWords(db: Database.Database) {
-  const word = db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)");
-  const insert = db.transaction(() => {
-    SEED_VERBS.forEach((value, index) => word.run(crypto.randomUUID(), "verb", value, index));
-    SEED_NOUNS.forEach((value, index) => word.run(crypto.randomUUID(), "noun", value, index));
-  });
-  insert();
+async function seedCaptionWords(db: Sql) {
+  for (const [index, value] of SEED_VERBS.entries()) {
+    await db.run("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)", crypto.randomUUID(), "verb", value, index);
+  }
+  for (const [index, value] of SEED_NOUNS.entries()) {
+    await db.run("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)", crypto.randomUUID(), "noun", value, index);
+  }
 }
 
-function insertMissingWords(db: Database.Database, bank: "noun" | "verb", words: string[]) {
-  const insert = db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)");
-  const exists = db.prepare("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?");
-  const maxPos = db.prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?");
-  const add = db.transaction(() => {
-    let position = (maxPos.get(bank) as { n: number }).n;
-    for (const word of words) {
-      if (exists.get(bank, word)) continue;
-      position += 1;
-      insert.run(crypto.randomUUID(), bank, word, position);
-    }
-  });
-  add();
+async function insertMissingWords(db: Sql, bank: "noun" | "verb", words: string[]) {
+  const maxPos = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?", bank);
+  let position = maxPos?.n ?? -1;
+  for (const word of words) {
+    const existing = await db.get("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?", bank, word);
+    if (existing) continue;
+    position += 1;
+    await db.run(
+      "INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)",
+      crypto.randomUUID(),
+      bank,
+      word,
+      position,
+    );
+  }
 }
 
-function migrateVerbBank(db: Database.Database) {
-  db.prepare("UPDATE caption_templates SET body = replace(body, '{adjective}', '{verb}')").run();
-  const drop = db.prepare("DELETE FROM caption_words WHERE word = ?");
-  for (const word of DROPPED_ADJECTIVES) drop.run(word);
-  db.prepare("UPDATE caption_words SET bank = 'verb' WHERE bank = 'adjective'").run();
-  insertMissingWords(db, "verb", SEED_VERBS);
-  insertMissingWords(db, "verb", EXTRA_VERBS);
-  insertMissingWords(db, "noun", EXTRA_NOUNS);
+async function migrateVerbBank(db: Sql) {
+  await db.run("UPDATE caption_templates SET body = replace(body, '{adjective}', '{verb}')");
+  for (const word of DROPPED_ADJECTIVES) {
+    await db.run("DELETE FROM caption_words WHERE word = ?", word);
+  }
+  await db.run("UPDATE caption_words SET bank = 'verb' WHERE bank = 'adjective'");
+  await insertMissingWords(db, "verb", SEED_VERBS);
+  await insertMissingWords(db, "verb", EXTRA_VERBS);
+  await insertMissingWords(db, "noun", EXTRA_NOUNS);
 }
 
-function ensureSeedTemplates(db: Database.Database) {
-  const existing = db.prepare("SELECT id, body FROM caption_templates").all() as { id: string; body: string }[];
+async function ensureSeedTemplates(db: Sql) {
+  const existing = await db.all<{ id: string; body: string }>("SELECT id, body FROM caption_templates");
   const byBody = new Map(existing.map((row) => [row.body, row]));
-  const insert = db.prepare("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)");
-  const updatePos = db.prepare("UPDATE caption_templates SET position = ? WHERE id = ?");
   const seedSet = new Set(SEED_TEMPLATES);
-  const sync = db.transaction(() => {
-    SEED_TEMPLATES.forEach((body, index) => {
-      const row = byBody.get(body);
-      if (!row) insert.run(crypto.randomUUID(), body, index);
-      else updatePos.run(index, row.id);
+  for (const [index, body] of SEED_TEMPLATES.entries()) {
+    const row = byBody.get(body);
+    if (!row) {
+      await db.run("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)", crypto.randomUUID(), body, index);
+    } else {
+      await db.run("UPDATE caption_templates SET position = ? WHERE id = ?", index, row.id);
+    }
+  }
+  let position = SEED_TEMPLATES.length;
+  for (const row of existing) {
+    if (!seedSet.has(row.body)) {
+      await db.run("UPDATE caption_templates SET position = ? WHERE id = ?", position, row.id);
+      position += 1;
+    }
+  }
+}
+
+export function getSql() {
+  if (!globalDb.instabotSql) {
+    globalDb.instabotSql = openDatabase().catch((error: unknown) => {
+      globalDb.instabotSql = undefined;
+      throw error;
     });
-    let position = SEED_TEMPLATES.length;
-    for (const row of existing) {
-      if (!seedSet.has(row.body)) updatePos.run(position, row.id);
-      position += seedSet.has(row.body) ? 0 : 1;
-    }
-  });
-  sync();
-}
-
-export function getDb() {
-  if (!globalDb.instabotDb) {
-    globalDb.instabotDb = openDatabase();
   }
-  return globalDb.instabotDb;
+  return globalDb.instabotSql;
 }
 
-export function getReel(id: string) {
-  return (
-    getDb().prepare("SELECT * FROM reels WHERE id = ?").get(id) as ReelRow | undefined
+export async function getReel(id: string) {
+  const db = await getSql();
+  return db.get<ReelRow>("SELECT * FROM reels WHERE id = ?", id);
+}
+
+export async function listReels() {
+  const db = await getSql();
+  return db.all<ReelRow>("SELECT * FROM reels WHERE status IN ('draft', 'approved') ORDER BY created_at DESC");
+}
+
+export async function deleteReel(id: string) {
+  const reel = await getReel(id);
+  if (reel?.video_path) await removeStoredVideo(reel.video_path);
+  const db = await getSql();
+  await db.run("DELETE FROM reels WHERE id = ?", id);
+}
+
+export async function purgePublished() {
+  const db = await getSql();
+  const rows = await db.all<{ id: string }>("SELECT id FROM reels WHERE status = 'posted'");
+  for (const row of rows) await deleteReel(row.id);
+}
+
+export async function countApproved() {
+  const db = await getSql();
+  const row = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM reels WHERE status = 'approved'");
+  return row?.n ?? 0;
+}
+
+export async function countDrafts() {
+  const db = await getSql();
+  const row = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM reels WHERE status = 'draft'");
+  return row?.n ?? 0;
+}
+
+export async function draftLines() {
+  const db = await getSql();
+  const rows = await db.all<{ line: string }>("SELECT line FROM reels WHERE status = 'draft'");
+  return rows.map((row) => row.line);
+}
+
+export async function usageCounts(column: "photo_id" | "motion") {
+  const db = await getSql();
+  const rows = await db.all<{ key: string; n: number }>(
+    `SELECT ${column} AS key, COUNT(*) AS n FROM reels GROUP BY ${column}`,
   );
-}
-
-export function listReels() {
-  return getDb()
-    .prepare(
-      "SELECT * FROM reels WHERE status IN ('draft', 'approved') ORDER BY created_at DESC",
-    )
-    .all() as ReelRow[];
-}
-
-export function deleteReel(id: string) {
-  const reel = getReel(id);
-  if (reel?.video_path) {
-    const root = path.resolve(RENDER_DIR);
-    const resolved = path.resolve(reel.video_path);
-    if ((resolved === root || resolved.startsWith(`${root}${path.sep}`)) && fs.existsSync(resolved)) {
-      fs.rmSync(resolved, { force: true });
-    }
-  }
-  getDb().prepare("DELETE FROM reels WHERE id = ?").run(id);
-}
-
-export function purgePublished() {
-  const rows = getDb().prepare("SELECT id FROM reels WHERE status = 'posted'").all() as { id: string }[];
-  for (const row of rows) deleteReel(row.id);
-}
-
-export function countApproved() {
-  const row = getDb()
-    .prepare("SELECT COUNT(*) AS n FROM reels WHERE status = 'approved'")
-    .get() as { n: number };
-  return row.n;
-}
-
-export function oldestApproved() {
-  return getDb()
-    .prepare(
-      "SELECT * FROM reels WHERE status = 'approved' ORDER BY approved_at ASC, created_at ASC LIMIT 1",
-    )
-    .get() as ReelRow | undefined;
-}
-
-export function getNextPublishAt() {
-  const row = getDb()
-    .prepare("SELECT next_publish_at FROM schedule WHERE id = 1")
-    .get() as { next_publish_at: number | null } | undefined;
-  return row?.next_publish_at ?? null;
-}
-
-export function setNextPublishAt(at: number | null) {
-  getDb().prepare("UPDATE schedule SET next_publish_at = ? WHERE id = 1").run(at);
-}
-
-export function countDrafts() {
-  const row = getDb()
-    .prepare("SELECT COUNT(*) AS n FROM reels WHERE status = 'draft'")
-    .get() as { n: number };
-  return row.n;
-}
-
-export function draftLines() {
-  return (
-    getDb()
-      .prepare("SELECT line FROM reels WHERE status = 'draft'")
-      .all() as { line: string }[]
-  ).map((row) => row.line);
-}
-
-export function usageCounts(column: "photo_id" | "motion") {
-  const rows = getDb()
-    .prepare(`SELECT ${column} AS key, COUNT(*) AS n FROM reels GROUP BY ${column}`)
-    .all() as { key: string; n: number }[];
   return new Map(rows.map((row) => [row.key, row.n]));
 }
 
-export function insertReel(row: ReelRow) {
-  getDb()
-    .prepare(
-      `INSERT INTO reels (
-        id, status, line, caption, caption_custom,
-        photo_id, photo_author, photo_username, photo_source_url, photo_license, photo_license_url, photo_file,
-        audio_id, audio_title, audio_artist, audio_artwork_url, audio_preview_url, audio_duration_ms,
-        motion, duration_sec, video_path, render_status, render_error, render_nonce,
-        rendered_line, rendered_motion, rendered_at,
-        post_state, post_error, ig_media_id, created_at, updated_at, approved_at, posted_at
-      ) VALUES (
-        @id, @status, @line, @caption, @caption_custom,
-        @photo_id, @photo_author, @photo_username, @photo_source_url, @photo_license, @photo_license_url, @photo_file,
-        @audio_id, @audio_title, @audio_artist, @audio_artwork_url, @audio_preview_url, @audio_duration_ms,
-        @motion, @duration_sec, @video_path, @render_status, @render_error, @render_nonce,
-        @rendered_line, @rendered_motion, @rendered_at,
-        @post_state, @post_error, @ig_media_id, @created_at, @updated_at, @approved_at, @posted_at
-      )`,
-    )
-    .run(row);
+export async function insertReel(row: ReelRow) {
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO reels (
+      id, status, line, caption, caption_custom,
+      photo_id, photo_author, photo_username, photo_source_url, photo_license, photo_license_url, photo_file,
+      audio_id, audio_title, audio_artist, audio_artwork_url, audio_preview_url, audio_duration_ms,
+      motion, duration_sec, video_path, render_status, render_error, render_nonce,
+      rendered_line, rendered_motion, rendered_at,
+      post_state, post_error, ig_media_id, created_at, updated_at, approved_at, posted_at
+    ) VALUES (
+      @id, @status, @line, @caption, @caption_custom,
+      @photo_id, @photo_author, @photo_username, @photo_source_url, @photo_license, @photo_license_url, @photo_file,
+      @audio_id, @audio_title, @audio_artist, @audio_artwork_url, @audio_preview_url, @audio_duration_ms,
+      @motion, @duration_sec, @video_path, @render_status, @render_error, @render_nonce,
+      @rendered_line, @rendered_motion, @rendered_at,
+      @post_state, @post_error, @ig_media_id, @created_at, @updated_at, @approved_at, @posted_at
+    )`,
+    row,
+  );
 }
 
-export function patchReel(id: string, fields: Partial<ReelRow>) {
+export async function patchReel(id: string, fields: Partial<ReelRow>) {
   const keys = Object.keys(fields) as (keyof ReelRow)[];
   if (keys.length === 0) return getReel(id);
   const assignments = keys.map((key) => `${key} = @${key}`).join(", ");
-  getDb()
-    .prepare(`UPDATE reels SET ${assignments} WHERE id = @id`)
-    .run({ ...fields, id });
+  const db = await getSql();
+  await db.run(`UPDATE reels SET ${assignments} WHERE id = @id`, { ...fields, id });
   return getReel(id);
-}
-
-export function videoExists(row: ReelRow) {
-  return Boolean(row.video_path && fs.existsSync(row.video_path));
 }

@@ -15,7 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PUBLISH_EVERY_MS } from "@/lib/cadence";
 import type { CatalogTrack, DeskPayload, ReelDTO } from "@/lib/types";
 
 type Tab = "drafts" | "approved";
@@ -29,15 +28,6 @@ async function postAction(id: string, body: Record<string, unknown>) {
   const data = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(data.error || "The desk could not do that.");
   return data;
-}
-
-function when(ts: number) {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(ts);
 }
 
 function motionLabel(motion: ReelDTO["motion"]) {
@@ -79,18 +69,6 @@ export function Portal({ initial }: { initial: DeskPayload }) {
   const busy = payload?.reels.some(
     (reel) => reel.renderStatus === "pending" || reel.renderStatus === "rendering",
   );
-
-  useEffect(() => {
-    const next = payload?.nextPublishAt;
-    if (!next) return;
-    const delay = Math.max(1500, next - Date.now() + 1000);
-    const timer = window.setTimeout(() => {
-      void load().catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "The desk could not load.");
-      });
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [payload?.nextPublishAt, load]);
 
   useEffect(() => {
     if (!busy) return;
@@ -135,7 +113,7 @@ export function Portal({ initial }: { initial: DeskPayload }) {
           <p className="text-xs tracking-[0.22em] text-muted-foreground uppercase">Reels desk</p>
           <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">Instabot</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
-            You only approve. Approved cuts wait in order and go out one every 8 hours. Instagram attaches the music when that slot fires.
+            You only approve. Approve publishes the silent reel immediately, and Instagram attaches the music on that call.
           </p>
         </div>
         <div className="flex flex-col items-start gap-3 sm:items-end">
@@ -175,7 +153,7 @@ export function Portal({ initial }: { initial: DeskPayload }) {
 
           <TabsContent value="drafts" className="mt-5 grid gap-4">
             <p className="text-sm text-muted-foreground">
-              {drafts.length} on the desk. The queue keeps about {payload?.draftTarget ?? 5} unapproved cuts ready.
+              {drafts.length} on the desk. Generate renders a silent cut before it shows up. The queue holds about {payload?.draftTarget ?? 5} drafts.
             </p>
             {drafts.length === 0 ? (
               <Empty
@@ -204,33 +182,28 @@ export function Portal({ initial }: { initial: DeskPayload }) {
           </TabsContent>
 
           <TabsContent value="approved" className="mt-5 grid gap-4">
-            {payload?.nextPublishAt ? (
-              <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
-                Next send {when(payload.nextPublishAt)}. One reel every 8 hours, oldest approval first.
-                A published media id removes it from the desk. A failed send stays here and tries the next slot.
-              </p>
-            ) : null}
             {!payload?.instagramConnected ? (
               <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
-                Instagram isn&apos;t connected, so these cuts stay silent. Music attaches once a professional
-                account is connected via Facebook Login (instagram_basic, instagram_content_publish, and a
-                linked Page). Until then each slot is skipped and the reel stays here.
+                Instagram isn&apos;t connected, so approving keeps the silent file here and does not post.
+                Music attaches once a professional account is connected via Facebook Login
+                (instagram_basic, instagram_content_publish, and a linked Page).
               </p>
-            ) : null}
+            ) : (
+              <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
+                A published media id removes the reel. A failed publish stays here with the error.
+              </p>
+            )}
             {approved.length === 0 ? (
               <Empty
                 title="Nothing is waiting."
-                body="Approve a draft and it waits here in approval order. The desk sends one every 8 hours. Nothing is filed as posted."
+                body="Approve a draft and it publishes immediately. If Instagram accepts it, the reel leaves the desk. If the post fails, it stays here. Nothing is filed as posted."
               />
             ) : (
-              approved.map((reel, index) => (
+              approved.map((reel) => (
                 <ReelCard
                   key={reel.id}
                   reel={reel}
                   connected={Boolean(payload?.instagramConnected)}
-                  sendsAt={
-                    payload?.nextPublishAt ? payload.nextPublishAt + index * PUBLISH_EVERY_MS : null
-                  }
                   onChange={() => void load()}
                 />
               ))
@@ -263,13 +236,11 @@ function Empty({
 function ReelCard({
   reel,
   connected,
-  sendsAt,
   onChange,
   onApproved,
 }: {
   reel: ReelDTO;
   connected: boolean;
-  sendsAt?: number | null;
   onChange: () => void;
   onApproved?: () => void;
 }) {
@@ -324,9 +295,6 @@ function ReelCard({
           {reel.usedBefore ? <Badge>Used before</Badge> : null}
           <Badge variant="secondary">{motionLabel(reel.motion)}</Badge>
           <Badge variant="outline">{reel.durationSec}s</Badge>
-          {reel.status === "approved" && sendsAt ? (
-            <Badge variant="outline">Sends {when(sendsAt)}</Badge>
-          ) : null}
           {reel.status === "approved" && reel.postState === "not_connected" ? (
             <Badge variant="outline">Not connected</Badge>
           ) : null}
@@ -370,7 +338,7 @@ function ReelCard({
         {reel.status === "approved" && reel.postState === "not_connected" ? (
           <p className="text-sm leading-6 text-muted-foreground">
             Saved as approved. The file is silent and nothing was posted. Music attaches once the
-            professional account is connected via Facebook Login.
+            professional account is connected via Facebook Login. Approve does not schedule a later send.
           </p>
         ) : null}
 
@@ -420,6 +388,15 @@ function ReelCard({
                 Skip
               </Button>
             </>
+          ) : null}
+          {reel.status === "approved" ? (
+            <Button
+              className="h-11"
+              disabled={Boolean(working)}
+              onClick={() => void run("publish", { action: "retry-publish" })}
+            >
+              {working === "publish" ? "Posting…" : "Try posting again"}
+            </Button>
           ) : null}
           {reel.videoUrl ? (
             <Button variant="outline" className="h-11" asChild>

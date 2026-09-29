@@ -51,5 +51,4 @@ export type DeskPayload = {
   reels: ReelDTO[];
   instagramConnected: boolean;
   draftTarget: number;
-  nextPublishAt: number | null;
 };

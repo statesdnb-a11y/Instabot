@@ -4,7 +4,7 @@ import { bootQueue } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  bootQueue();
-  return <Portal initial={deskPayload()} />;
+export default async function HomePage() {
+  await bootQueue();
+  return <Portal initial={await deskPayload()} />;
 }

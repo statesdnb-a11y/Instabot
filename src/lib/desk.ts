@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
-import { getNextPublishAt, getReel, listReels, patchReel, videoExists, type ReelRow } from "@/lib/db";
+import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
-import { armScheduler } from "@/lib/schedule";
+import { onVercel, videoExists } from "@/lib/media";
 import { PHOTO_DIR, RENDER_DIR } from "@/lib/paths";
+import { publishApprovedNow } from "@/lib/publish";
 import { DRAFT_TARGET, fillQueue, markForRender } from "@/lib/queue";
 import type { CatalogTrack, DeskPayload, Motion, ReelDTO } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
@@ -24,7 +25,7 @@ function audioDto(row: ReelRow): CatalogTrack | null {
   };
 }
 
-export function toReelDTO(row: ReelRow): ReelDTO {
+export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
   const hasFile = videoExists(row);
   const inSync =
     row.render_status === "ready" &&
@@ -37,7 +38,7 @@ export function toReelDTO(row: ReelRow): ReelDTO {
     line: row.line,
     caption: row.caption,
     captionCustom: row.caption_custom === 1,
-    usedBefore: captionUsedOnCard(row.id, row.status, row.caption),
+    usedBefore: await captionUsedOnCard(row.id, row.status, row.caption),
     photo: {
       id: row.photo_id,
       author: row.photo_author,
@@ -64,17 +65,17 @@ export function toReelDTO(row: ReelRow): ReelDTO {
   };
 }
 
-export function deskPayload(): DeskPayload {
+export async function deskPayload(): Promise<DeskPayload> {
+  const reels = await listReels();
   return {
-    reels: listReels().map(toReelDTO),
+    reels: await Promise.all(reels.map((row) => toReelDTO(row))),
     instagramConnected: instagramConnected(),
     draftTarget: DRAFT_TARGET,
-    nextPublishAt: getNextPublishAt(),
   };
 }
 
-function requireDraft(id: string) {
-  const reel = getReel(id);
+async function requireDraft(id: string) {
+  const reel = await getReel(id);
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status !== "draft") throw new DeskError("Only a draft can be changed.", 409);
   return reel;
@@ -96,28 +97,28 @@ function cleanText(value: unknown, max: number, label: string) {
   return text;
 }
 
-export function updateDraft(
+export async function updateDraft(
   id: string,
   input: { line?: unknown; caption?: unknown; captionCustom?: unknown },
 ) {
-  const reel = requireDraft(id);
+  const reel = await requireDraft(id);
   const line = input.line === undefined ? reel.line : cleanText(input.line, MAX_LINE, "The line");
   const captionCustom = Boolean(input.captionCustom);
   const caption = captionCustom
     ? cleanText(input.caption ?? reel.caption, MAX_CAPTION, "The caption")
     : line;
   const lineChanged = line !== reel.line;
-  patchReel(id, {
+  await patchReel(id, {
     line,
     caption,
     caption_custom: captionCustom ? 1 : 0,
     updated_at: Date.now(),
   });
   if (lineChanged) {
-    markForRender(id);
-    learnLine(line);
+    await markForRender(id);
+    await learnLine(line);
   }
-  const next = getReel(id);
+  const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
 }
@@ -126,15 +127,15 @@ function httpsOrNull(value: unknown) {
   return typeof value === "string" && value.startsWith("https://") ? value : null;
 }
 
-export function setAudio(id: string, audio: unknown) {
-  requireDraft(id);
+export async function setAudio(id: string, audio: unknown) {
+  await requireDraft(id);
   if (!audio || typeof audio !== "object") throw new DeskError("Pick a track.", 400);
   const raw = audio as Record<string, unknown>;
   const audioId = typeof raw.id === "string" ? raw.id.trim() : "";
   const title = typeof raw.title === "string" ? raw.title.trim() : "";
   const artist = typeof raw.artist === "string" ? raw.artist.trim() : "";
   if (!audioId || !title) throw new DeskError("That track is missing a title.", 400);
-  patchReel(id, {
+  await patchReel(id, {
     audio_id: audioId,
     audio_title: title,
     audio_artist: artist,
@@ -143,88 +144,100 @@ export function setAudio(id: string, audio: unknown) {
     audio_duration_ms: typeof raw.durationMs === "number" ? raw.durationMs : null,
     updated_at: Date.now(),
   });
-  const next = getReel(id);
+  const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
 }
 
-export function regenerateLine(id: string) {
-  const reel = requireDraft(id);
-  const line = nextLine([reel.line]);
-  patchReel(id, {
+export async function regenerateLine(id: string) {
+  const reel = await requireDraft(id);
+  const line = await nextLine([reel.line]);
+  await patchReel(id, {
     line,
     caption: reel.caption_custom ? reel.caption : line,
     updated_at: Date.now(),
   });
-  markForRender(id);
-  const next = getReel(id);
+  await markForRender(id);
+  const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
 }
 
-export function regenerateMotion(id: string) {
-  const reel = requireDraft(id);
+export async function regenerateMotion(id: string) {
+  const reel = await requireDraft(id);
   const motion: Motion = reel.motion === "zoom" ? "pan" : "zoom";
-  patchReel(id, { motion, updated_at: Date.now() });
-  markForRender(id);
-  const next = getReel(id);
+  await patchReel(id, { motion, updated_at: Date.now() });
+  await markForRender(id);
+  const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
 }
 
-export function retryRender(id: string) {
-  const reel = requireDraft(id);
+export async function retryRender(id: string) {
+  const reel = await requireDraft(id);
   if (reel.render_status === "rendering" || reel.render_status === "pending") {
     return toReelDTO(reel);
   }
-  markForRender(id);
-  const next = getReel(id);
+  await markForRender(id);
+  const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
 }
 
-export function skipReel(id: string) {
-  const reel = getReel(id);
+export async function skipReel(id: string) {
+  const reel = await getReel(id);
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status !== "draft") throw new DeskError("Only a draft can be skipped.", 409);
-  patchReel(id, { status: "skipped", updated_at: Date.now() });
-  fillQueue(0);
+  await patchReel(id, { status: "skipped", updated_at: Date.now() });
+  if (!onVercel()) void fillQueue(0).catch(() => undefined);
   return { ok: true };
 }
 
-function assertReadyToPost(reel: ReelRow) {
-  const dto = toReelDTO(reel);
+async function assertReadyToPost(reel: ReelRow) {
+  const dto = await toReelDTO(reel);
   if (!dto.inSync) {
     throw new DeskError("Render the latest line and motion before this can be posted.", 409);
   }
   if (!reel.video_path) {
     throw new DeskError("This reel has no video file yet.", 409);
   }
-  return reel.video_path;
 }
 
-export function approveReel(id: string) {
-  const reel = getReel(id);
+async function finishPublish(id: string) {
+  const removed = await publishApprovedNow(id);
+  if (removed) return { removed: true as const };
+  const next = await getReel(id);
+  if (!next) return { removed: true as const };
+  return toReelDTO(next);
+}
+
+export async function approveReel(id: string) {
+  const reel = await getReel(id);
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status === "approved") return toReelDTO(reel);
   if (reel.status !== "draft") {
     throw new DeskError("This reel can't be approved from here.", 409);
   }
-  assertReadyToPost(reel);
-  rememberCaption(reel.caption);
+  await assertReadyToPost(reel);
+  await rememberCaption(reel.caption);
   const now = Date.now();
-  patchReel(id, {
+  await patchReel(id, {
     status: "approved",
     approved_at: now,
     post_state: null,
     post_error: null,
     updated_at: now,
   });
-  armScheduler();
-  fillQueue(0);
-  const next = getReel(id);
-  if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
-  return toReelDTO(next);
+  const result = await finishPublish(id);
+  if (!onVercel()) void fillQueue(0).catch(() => undefined);
+  return result;
+}
+
+export async function retryPublish(id: string) {
+  const reel = await getReel(id);
+  if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
+  if (reel.status !== "approved") throw new DeskError("Only an approved reel can be posted again.", 409);
+  return finishPublish(id);
 }
 
 function insideDir(filePath: string, dir: string) {
@@ -233,19 +246,27 @@ function insideDir(filePath: string, dir: string) {
   return resolved === root || resolved.startsWith(`${root}${path.sep}`);
 }
 
-export function reelMedia(id: string, kind: "video" | "poster") {
-  const reel = getReel(id);
+export async function reelMedia(id: string, kind: "video" | "poster") {
+  const reel = await getReel(id);
   if (!reel) return null;
   if (kind === "poster") {
     const file = path.join(PHOTO_DIR, reel.photo_file);
     if (!insideDir(file, PHOTO_DIR) || !fs.existsSync(file)) return null;
-    return { file, type: "image/jpeg" as const, downloadName: null };
+    return { file, url: null as string | null, type: "image/jpeg" as const, downloadName: null };
   }
-  if (!reel.video_path || !insideDir(reel.video_path, RENDER_DIR) || !fs.existsSync(reel.video_path)) {
-    return null;
+  if (!reel.video_path) return null;
+  if (reel.video_path.startsWith("https://")) {
+    return {
+      file: null as string | null,
+      url: reel.video_path,
+      type: "video/mp4" as const,
+      downloadName: `instabot-${reel.id}.mp4`,
+    };
   }
+  if (!insideDir(reel.video_path, RENDER_DIR) || !fs.existsSync(reel.video_path)) return null;
   return {
     file: reel.video_path,
+    url: null as string | null,
     type: "video/mp4" as const,
     downloadName: `instabot-${reel.id}.mp4`,
   };

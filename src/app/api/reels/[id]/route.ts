@@ -5,6 +5,7 @@ import {
   approveReel,
   regenerateLine,
   regenerateMotion,
+  retryPublish,
   retryRender,
   setAudio,
   skipReel,
@@ -13,6 +14,7 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -37,24 +39,26 @@ export async function POST(
     switch (body.action) {
       case "update":
         return json(
-          updateDraft(id, {
+          await updateDraft(id, {
             line: body.line,
             caption: body.caption,
             captionCustom: body.captionCustom,
           }),
         );
       case "set-audio":
-        return json(setAudio(id, body.audio));
+        return json(await setAudio(id, body.audio));
       case "regenerate-line":
-        return json(regenerateLine(id));
+        return json(await regenerateLine(id));
       case "regenerate-motion":
-        return json(regenerateMotion(id));
+        return json(await regenerateMotion(id));
       case "retry-render":
-        return json(retryRender(id));
+        return json(await retryRender(id));
       case "approve":
-        return json(approveReel(id));
+        return json(await approveReel(id));
+      case "retry-publish":
+        return json(await retryPublish(id));
       case "skip":
-        return json(skipReel(id));
+        return json(await skipReel(id));
       default:
         return json({ error: "Unknown action." }, 400);
     }

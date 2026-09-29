@@ -1,21 +1,29 @@
 # Instabot
 
-A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short silent vertical reel. Instagram attaches a track from its licensed catalog when a send slot fires.
+A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short silent vertical reel. Instagram attaches a track from its licensed catalog when you approve.
 
-## Run it
-
-You need Node.js and `ffmpeg` on your PATH (`libx264`).
+## Run it locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-The desk listens on [http://127.0.0.1:43123](http://127.0.0.1:43123) (`0.0.0.0:43123`).
+The desk listens on [http://127.0.0.1:43123](http://127.0.0.1:43123) (`0.0.0.0:43123`). Rendering uses the `ffmpeg-static` binary bundled with the app, and falls back to `ffmpeg` on your PATH. The on-screen type is the bundled Noto Serif Italic in `assets/`.
 
-The first launch fills five drafts and renders them one at a time. A 10 second 1080×1920 cut usually takes a few seconds. While a card says “Cutting this reel…”, leave the tab open.
+The first local launch fills five drafts and renders them one at a time in the background. Generate on this machine tops the queue back up to five and waits until each new file is written. A 10 second 1080×1920 cut usually takes a few seconds.
 
-Copy `.env.example` to `.env.local` if you want a passphrase or Instagram publishing. With nothing set, the desk is open, the reels stay silent, and approving does not try to post.
+Copy `.env.example` to `.env.local` if you want a passphrase, Instagram publishing, or hosted storage. With nothing set, the desk is open, the reels stay silent, and approving records the reel as not connected instead of posting.
+
+## Hosted site
+
+The same Next.js app is what runs on Vercel. Open the deployed URL, click Generate, edit a line, and approve on that site. Nothing has to stay running on a laptop.
+
+Generate, New line, New motion, and a saved line edit render inside that request with `ffmpeg-static` and store the mp4 before the response returns. On Vercel each Generate click adds one reel so the render can finish inside a serverless function. Hobby functions stop at 60 seconds.
+
+Local files do not survive a serverless instance. When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are both set, the queue, caption banks, and used captions go to Turso. When `BLOB_READ_WRITE_TOKEN` is set, mp4s go to Vercel Blob. Leave those unset and local dev keeps SQLite in `data/instabot.db` and mp4s in `data/renders/`.
+
+There is no in-process timer and no Vercel cron. Approve publishes immediately.
 
 ## What a reel is
 
@@ -30,13 +38,13 @@ Editing the on-screen line or regenerating the motion marks the cut stale and re
 ## The desk
 
 - **Drafts** — preview, edit the line, optionally a separate caption, new line, new motion, swap the catalog track, approve, or skip.
-- **Approved** — reels waiting in approval order. One sends every 8 hours. The list shows the next send time. A failure stays here with the error and retries on the next slot. There is no posted archive.
+- **Approved** — a publish that did not return a media id. A failure stays here with the error. There is no posted archive.
 
 Each draft shows the chosen track’s title, artist, and artwork once a catalog result is attached. Search and trending come from the official Audio API. Without credentials the card says music attaches after Facebook Login.
 
 **Generate** tops the draft queue up to 5, or adds one more if it is already full. The server also refills after approve and skip, and on startup.
 
-The queue lives in `data/instabot.db` (SQLite). Rendered mp4s live in `data/renders/` and are not committed. Stills in `data/photos` are.
+Locally the queue lives in `data/instabot.db` (SQLite) and rendered mp4s live in `data/renders/`. Those files are not committed. Stills in `data/photos` are. On Vercel the same rows live in Turso and the mp4s live in Vercel Blob when those credentials are set.
 
 Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb}`, `{him/her}`, `{he/she}`, and `{his/her}`. The noun and verb banks are edited there too. **New line** and new drafts use that system, and they skip a caption that was already published, is on Approved, or is already on another draft. Saving a custom line keeps that exact line on the reel, files a template, and marks the card **Used before** when that caption collides. Approving remembers the final caption even after the reel is deleted. Pronouns in a typed line become `{he/she}`, `{him/her}`, or `{his/her}`, and a part-of-speech tagger turns nouns and verbs into blanks and bank words. Click a noun or verb blank to flip it. Seeded templates are not re-analyzed.
 
@@ -47,6 +55,9 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 | `INSTABOT_PASSWORD` | No | Locks the portal. Unset means open. |
 | `IG_ACCESS_TOKEN` | No | Facebook Login token for the Instagram API. |
 | `IG_USER_ID` | No | Instagram professional account id. |
+| `TURSO_DATABASE_URL` | For Vercel | libsql URL for the queue, banks, and used captions. |
+| `TURSO_AUTH_TOKEN` | For Vercel | Turso token. Both Turso variables are required together. |
+| `BLOB_READ_WRITE_TOKEN` | For Vercel | Stores silent mp4s in Vercel Blob. |
 | `UNSPLASH_ACCESS_KEY` | No | Unused in this version. Stills are bundled. |
 | `PEXELS_API_KEY` | No | Unused in this version. Stills are bundled. |
 
@@ -66,11 +77,11 @@ Without `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works, the reel stay
 
 ## Posting to Instagram
 
-Approve only moves the reel onto the Approved list. It does not create an Instagram media container. Containers expire in about 24 hours, so one is opened only when a send slot fires.
+Approve publishes immediately. It creates the media container then, uploads the silent mp4, sets `audio_configuration` to the chosen `audio_id` (or the first trending track if none was picked) with `video_volume` 0, then calls `media_publish` with `creation_id` only.
 
-Approved reels wait in approval order. The desk publishes one every 8 hours and shows the next send time on that list. When the slot fires it uploads the local silent mp4, sets `audio_configuration` to the chosen `audio_id` (or the first trending track if none was picked) with `video_volume` 0, then calls `media_publish` with `creation_id` only. That call publishes when it is made. It does not take `scheduled_publish_time`, and this desk does not use Facebook Page video scheduling.
+`media_publish` has no schedule time. This desk does not call Facebook Page `scheduled_publish_time`. That is a different product. There is no 8-hour timer and no cron.
 
-When Meta returns a published media id, the reel is deleted. A failed send stays on Approved with the error and is retried on the next slot. If Instagram is not connected, the slot is skipped, the reel stays, and the silent mp4 remains downloadable. Nothing is saved as a posted history.
+When Meta returns a published media id, the reel is deleted. A failed publish stays on Approved with the error. Try posting again from that card. If Instagram is not connected, the reel stays on Approved with nothing posted, and the silent mp4 remains downloadable. Nothing is saved as a posted history.
 
 ### Professional account setup
 
@@ -81,6 +92,7 @@ When Meta returns a published media id, the reel is deleted. A failed send stays
 5. Find the Instagram user id: `GET /me/accounts`, then `GET /{page-id}?fields=instagram_business_account`.
 6. Put the token in `IG_ACCESS_TOKEN` and that id in `IG_USER_ID`.
 7. The app needs to be in Live mode, or the Instagram account needs a role on the app, or publish calls are rejected.
-8. Restart the dev server. Trending and search fill the track picker. Approving posts the silent file and asks Instagram to attach the chosen track.
+8. Put the token in `IG_ACCESS_TOKEN` and that id in `IG_USER_ID` on the host, then redeploy or restart.
+9. Trending and search fill the track picker. Approving posts the silent file and asks Instagram to attach the chosen track.
 
-The video is uploaded from the local file. A public video URL is not required. Docs: [Audio API](https://developers.facebook.com/documentation/instagram-platform/content-publishing/audio-api).
+The video bytes are uploaded from the stored mp4, whether that file is on disk or in Vercel Blob. A public video URL is not required for the Graph upload. Docs: [Audio API](https://developers.facebook.com/documentation/instagram-platform/content-publishing/audio-api).

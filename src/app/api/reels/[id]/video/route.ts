@@ -11,8 +11,10 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const media = reelMedia(id, "video");
+  const media = await reelMedia(id, "video");
   if (!media) return new Response("Reel not found.", { status: 404 });
+  if (media.url) return Response.redirect(media.url, 302);
+  if (!media.file) return new Response("Reel not found.", { status: 404 });
 
   const size = statSync(media.file).size;
   const download = new URL(request.url).searchParams.get("download") === "1";

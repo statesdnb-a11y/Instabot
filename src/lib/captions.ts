@@ -1,5 +1,5 @@
 import winkPosTagger from "wink-pos-tagger";
-import { getDb } from "@/lib/db";
+import { getSql } from "@/lib/db";
 
 const tagger = winkPosTagger();
 
@@ -61,14 +61,14 @@ function clean(value: unknown, max: number, label: string) {
   return text;
 }
 
-export function captionDesk(): CaptionDesk {
-  const db = getDb();
-  const templates = db
-    .prepare("SELECT id, body AS text FROM caption_templates ORDER BY position ASC, rowid ASC")
-    .all() as CaptionEntry[];
-  const words = db
-    .prepare("SELECT id, bank, word AS text FROM caption_words ORDER BY position ASC, rowid ASC")
-    .all() as { id: string; bank: string; text: string }[];
+export async function captionDesk(): Promise<CaptionDesk> {
+  const db = await getSql();
+  const templates = await db.all<CaptionEntry>(
+    "SELECT id, body AS text FROM caption_templates ORDER BY position ASC, rowid ASC",
+  );
+  const words = await db.all<{ id: string; bank: string; text: string }>(
+    "SELECT id, bank, word AS text FROM caption_words ORDER BY position ASC, rowid ASC",
+  );
   return {
     templates,
     nouns: words.filter((word) => word.bank === "noun").map(({ id, text }) => ({ id, text })),
@@ -76,59 +76,54 @@ export function captionDesk(): CaptionDesk {
   };
 }
 
-export function addTemplate(value: unknown) {
+export async function addTemplate(value: unknown) {
   const text = clean(value, MAX_TEMPLATE, "A template");
-  const db = getDb();
-  const row = db.prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates").get() as { n: number };
-  db.prepare("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)").run(
-    crypto.randomUUID(),
-    text,
-    row.n + 1,
-  );
+  const db = await getSql();
+  const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates");
+  await db.run("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)", crypto.randomUUID(), text, (row?.n ?? -1) + 1);
   return captionDesk();
 }
 
-export function deleteTemplate(id: unknown) {
+export async function deleteTemplate(id: unknown) {
   if (typeof id !== "string" || !id) throw new CaptionError("That template is missing.");
-  const result = getDb().prepare("DELETE FROM caption_templates WHERE id = ?").run(id);
+  const db = await getSql();
+  const result = await db.run("DELETE FROM caption_templates WHERE id = ?", id);
   if (result.changes === 0) throw new CaptionError("That template is already gone.", 404);
   return captionDesk();
 }
 
-export function addWord(bank: unknown, value: unknown) {
+export async function addWord(bank: unknown, value: unknown) {
   if (bank !== "noun" && bank !== "verb") throw new CaptionError("Pick the noun or verb bank.");
   const text = clean(value, MAX_WORD, "A word");
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?")
-    .get(bank, text) as { n: number } | undefined;
+  const db = await getSql();
+  const existing = await db.get("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?", bank, text);
   if (existing) throw new CaptionError("That word is already in the bank.");
-  const row = db
-    .prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?")
-    .get(bank) as { n: number };
-  db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)").run(
+  const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?", bank);
+  await db.run(
+    "INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)",
     crypto.randomUUID(),
     bank,
     text,
-    row.n + 1,
+    (row?.n ?? -1) + 1,
   );
   return captionDesk();
 }
 
-export function deleteWord(id: unknown) {
+export async function deleteWord(id: unknown) {
   if (typeof id !== "string" || !id) throw new CaptionError("That word is missing.");
-  const result = getDb().prepare("DELETE FROM caption_words WHERE id = ?").run(id);
+  const db = await getSql();
+  const result = await db.run("DELETE FROM caption_words WHERE id = ?", id);
   if (result.changes === 0) throw new CaptionError("That word is already gone.", 404);
   return captionDesk();
 }
 
-export function flipBlank(id: unknown, index: unknown) {
+export async function flipBlank(id: unknown, index: unknown) {
   if (typeof id !== "string" || !id) throw new CaptionError("That template is missing.");
   if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
     throw new CaptionError("That blank is missing.");
   }
-  const db = getDb();
-  const row = db.prepare("SELECT body FROM caption_templates WHERE id = ?").get(id) as { body: string } | undefined;
+  const db = await getSql();
+  const row = await db.get<{ body: string }>("SELECT body FROM caption_templates WHERE id = ?", id);
   if (!row) throw new CaptionError("That template is already gone.", 404);
   let seen = 0;
   let flipped = false;
@@ -142,65 +137,61 @@ export function flipBlank(id: unknown, index: unknown) {
     return token === "{noun}" ? "{verb}" : "{noun}";
   });
   if (!flipped) throw new CaptionError("That blank is missing.");
-  db.prepare("UPDATE caption_templates SET body = ? WHERE id = ?").run(body, id);
+  await db.run("UPDATE caption_templates SET body = ? WHERE id = ?", body, id);
   return captionDesk();
 }
 
-export function flipWord(id: unknown) {
+export async function flipWord(id: unknown) {
   if (typeof id !== "string" || !id) throw new CaptionError("That word is missing.");
-  const db = getDb();
-  const row = db.prepare("SELECT id, bank, word FROM caption_words WHERE id = ?").get(id) as
-    | { id: string; bank: CaptionBank; word: string }
-    | undefined;
+  const db = await getSql();
+  const row = await db.get<{ id: string; bank: CaptionBank; word: string }>(
+    "SELECT id, bank, word FROM caption_words WHERE id = ?",
+    id,
+  );
   if (!row) throw new CaptionError("That word is already gone.", 404);
   const nextBank: CaptionBank = row.bank === "noun" ? "verb" : "noun";
-  const duplicate = db
-    .prepare("SELECT id FROM caption_words WHERE bank = ? AND word = ?")
-    .get(nextBank, row.word) as { id: string } | undefined;
+  const duplicate = await db.get<{ id: string }>("SELECT id FROM caption_words WHERE bank = ? AND word = ?", nextBank, row.word);
   if (duplicate) {
-    db.prepare("DELETE FROM caption_words WHERE id = ?").run(row.id);
+    await db.run("DELETE FROM caption_words WHERE id = ?", row.id);
   } else {
-    const position = db
-      .prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?")
-      .get(nextBank) as { n: number };
-    db.prepare("UPDATE caption_words SET bank = ?, position = ? WHERE id = ?").run(nextBank, position.n + 1, row.id);
+    const position = await db.get<{ n: number }>(
+      "SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?",
+      nextBank,
+    );
+    await db.run("UPDATE caption_words SET bank = ?, position = ? WHERE id = ?", nextBank, (position?.n ?? -1) + 1, row.id);
   }
   return captionDesk();
 }
 
-function rememberWord(bank: CaptionBank, word: string, seen: Set<string>) {
+async function rememberWord(bank: CaptionBank, word: string, seen: Set<string>) {
   const text = word.toLowerCase();
   if (!text || text.length > MAX_WORD || seen.has(text)) return;
   seen.add(text);
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?")
-    .get(bank, text) as { n: number } | undefined;
+  const db = await getSql();
+  const existing = await db.get("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?", bank, text);
   if (existing) return;
-  const row = db
-    .prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?")
-    .get(bank) as { n: number };
-  db.prepare("INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)").run(
+  const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?", bank);
+  await db.run(
+    "INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)",
     crypto.randomUUID(),
     bank,
     text,
-    row.n + 1,
+    (row?.n ?? -1) + 1,
   );
 }
 
-function rememberTemplate(body: string) {
+async function rememberTemplate(body: string) {
   const text = body.trim();
   if (!text || text.length > MAX_TEMPLATE) return;
-  const db = getDb();
-  const existing = db.prepare("SELECT 1 AS n FROM caption_templates WHERE body = ?").get(text) as
-    | { n: number }
-    | undefined;
+  const db = await getSql();
+  const existing = await db.get("SELECT 1 AS n FROM caption_templates WHERE body = ?", text);
   if (existing) return;
-  const row = db.prepare("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates").get() as { n: number };
-  db.prepare("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)").run(
+  const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates");
+  await db.run(
+    "INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)",
     crypto.randomUUID(),
     text,
-    row.n + 1,
+    (row?.n ?? -1) + 1,
   );
 }
 
@@ -233,13 +224,12 @@ export function captionKey(text: string) {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-export function blockedCaptionKeys() {
+export async function blockedCaptionKeys() {
+  const db = await getSql();
   const keys = new Set<string>();
-  const remembered = getDb().prepare("SELECT caption_key FROM used_captions").all() as { caption_key: string }[];
+  const remembered = await db.all<{ caption_key: string }>("SELECT caption_key FROM used_captions");
   for (const row of remembered) keys.add(row.caption_key);
-  const live = getDb().prepare(
-    "SELECT caption FROM reels WHERE status IN ('draft', 'approved')",
-  ).all() as { caption: string }[];
+  const live = await db.all<{ caption: string }>("SELECT caption FROM reels WHERE status IN ('draft', 'approved')");
   for (const row of live) {
     const key = captionKey(row.caption);
     if (key) keys.add(key);
@@ -247,27 +237,28 @@ export function blockedCaptionKeys() {
   return keys;
 }
 
-export function rememberCaption(caption: string) {
+export async function rememberCaption(caption: string) {
   const key = captionKey(caption);
   if (!key) return;
-  getDb().prepare("INSERT OR IGNORE INTO used_captions (caption_key) VALUES (?)").run(key);
+  const db = await getSql();
+  await db.run("INSERT OR IGNORE INTO used_captions (caption_key) VALUES (?)", key);
 }
 
-export function captionUsedOnCard(id: string, status: string, caption: string) {
+export async function captionUsedOnCard(id: string, status: string, caption: string) {
   const key = captionKey(caption);
   if (!key) return false;
-  const others = getDb().prepare(
+  const db = await getSql();
+  const others = await db.all<{ caption: string }>(
     "SELECT caption FROM reels WHERE status IN ('draft', 'approved') AND id != ?",
-  ).all(id) as { caption: string }[];
+    id,
+  );
   if (others.some((row) => captionKey(row.caption) === key)) return true;
   if (status !== "draft") return false;
-  const remembered = getDb()
-    .prepare("SELECT 1 AS n FROM used_captions WHERE caption_key = ?")
-    .get(key) as { n: number } | undefined;
+  const remembered = await db.get("SELECT 1 AS n FROM used_captions WHERE caption_key = ?", key);
   return Boolean(remembered);
 }
 
-function slotForWord(word: string, pos: string, nouns: Set<string>, verbs: Set<string>) {
+async function slotForWord(word: string, pos: string, nouns: Set<string>, verbs: Set<string>) {
   const lower = word.toLowerCase();
   if (lower === "he" || lower === "she") return "{he/she}";
   if (lower === "him" || lower === "her") return "{him/her}";
@@ -276,34 +267,39 @@ function slotForWord(word: string, pos: string, nouns: Set<string>, verbs: Set<s
   if (verbs.has(lower)) return "{verb}";
   if (nouns.has(lower)) return "{noun}";
   if (pos.startsWith("VB")) {
-    rememberWord("verb", lower, verbs);
+    await rememberWord("verb", lower, verbs);
     return "{verb}";
   }
   if (pos.startsWith("NN")) {
-    rememberWord("noun", lower, nouns);
+    await rememberWord("noun", lower, nouns);
     return "{noun}";
   }
   return word;
 }
 
-export function learnLine(line: string) {
+export async function learnLine(line: string) {
   const pieces = line.match(PIECE) ?? [line];
   const words = pieces.filter((piece) => WORD.test(piece));
   const poses = posesForWords(words);
-  const desk = captionDesk();
+  const desk = await captionDesk();
   const nouns = new Set(desk.nouns.map((entry) => entry.text.toLowerCase()));
   const verbs = new Set(desk.verbs.map((entry) => entry.text.toLowerCase()));
   let wordIndex = 0;
-  const body = pieces
-    .map((piece) => {
-      if (piece.startsWith("{") && piece.endsWith("}")) return piece;
-      if (!WORD.test(piece)) return piece;
-      const pos = poses[wordIndex] ?? "";
-      wordIndex += 1;
-      return slotForWord(piece, pos, nouns, verbs);
-    })
-    .join("");
-  rememberTemplate(body);
+  let body = "";
+  for (const piece of pieces) {
+    if (piece.startsWith("{") && piece.endsWith("}")) {
+      body += piece;
+      continue;
+    }
+    if (!WORD.test(piece)) {
+      body += piece;
+      continue;
+    }
+    const pos = poses[wordIndex] ?? "";
+    wordIndex += 1;
+    body += await slotForWord(piece, pos, nouns, verbs);
+  }
+  await rememberTemplate(body);
 }
 
 function tokenChoices(token: string, nouns: string[], verbs: string[]) {
@@ -340,14 +336,14 @@ function* fillsOf(template: string, nouns: string[], verbs: string[]) {
   }
 }
 
-export function nextLine(exclude: string[] = []) {
-  const desk = captionDesk();
+export async function nextLine(exclude: string[] = []) {
+  const desk = await captionDesk();
   if (desk.templates.length === 0) {
     throw new CaptionError("Add a caption template before generating a line.");
   }
   const nouns = desk.nouns.map((entry) => entry.text);
   const verbs = desk.verbs.map((entry) => entry.text);
-  const blocked = blockedCaptionKeys();
+  const blocked = await blockedCaptionKeys();
   for (const extra of exclude) {
     const key = captionKey(extra);
     if (key) blocked.add(key);

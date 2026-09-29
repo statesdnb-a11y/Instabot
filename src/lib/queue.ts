@@ -1,17 +1,22 @@
 import fs from "node:fs";
-import path from "node:path";
 import {
   countDrafts,
   draftLines,
-  getDb,
   getReel,
+  getSql,
   insertReel,
   patchReel,
   purgePublished,
   usageCounts,
   type ReelRow,
 } from "@/lib/db";
-import { RENDER_DIR, ensureDataDirs } from "@/lib/paths";
+import {
+  onVercel,
+  removeStoredVideo,
+  renderOutputPath,
+  saveRenderedMp4,
+} from "@/lib/media";
+import { ensureDataDirs } from "@/lib/paths";
 import { PHOTOS, type StockPhoto } from "@/lib/photos";
 import { renderReelFile } from "@/lib/render";
 import type { Motion } from "@/lib/types";
@@ -20,7 +25,7 @@ import { nextLine } from "@/lib/voice";
 export const DRAFT_TARGET = 5;
 
 const globalQueue = globalThis as unknown as {
-  instabotBooted?: boolean;
+  instabotBoot?: Promise<void>;
   instabotPumping?: boolean;
   instabotQueued?: Set<string>;
 };
@@ -37,18 +42,18 @@ function leastUsed<T extends { id: string }>(items: T[], counts: Map<string, num
   return pool[Math.floor(Math.random() * pool.length)] ?? items[0];
 }
 
-function pickMotion(): Motion {
-  const counts = usageCounts("motion");
+async function pickMotion(): Promise<Motion> {
+  const counts = await usageCounts("motion");
   const zoom = counts.get("zoom") ?? 0;
   const pan = counts.get("pan") ?? 0;
   if (zoom === pan) return Math.random() < 0.5 ? "zoom" : "pan";
   return zoom < pan ? "zoom" : "pan";
 }
 
-export function createDraft() {
+export async function createDraft() {
   const now = Date.now();
-  const photo = leastUsed<StockPhoto>(PHOTOS, usageCounts("photo_id"));
-  const line = nextLine(draftLines());
+  const photo = leastUsed<StockPhoto>(PHOTOS, await usageCounts("photo_id"));
+  const line = await nextLine(await draftLines());
   const row: ReelRow = {
     id: crypto.randomUUID(),
     status: "draft",
@@ -68,7 +73,7 @@ export function createDraft() {
     audio_artwork_url: null,
     audio_preview_url: null,
     audio_duration_ms: null,
-    motion: pickMotion(),
+    motion: await pickMotion(),
     duration_sec: 8 + Math.floor(Math.random() * 5),
     video_path: null,
     render_status: "pending",
@@ -85,7 +90,7 @@ export function createDraft() {
     approved_at: null,
     posted_at: null,
   };
-  insertReel(row);
+  await insertReel(row);
   return row.id;
 }
 
@@ -109,17 +114,17 @@ async function pump() {
   }
 }
 
-async function renderOne(id: string) {
-  const reel = getReel(id);
+export async function renderOne(id: string) {
+  const reel = await getReel(id);
   if (!reel || reel.status !== "draft") return;
   const nonce = reel.render_nonce;
-  patchReel(id, {
+  await patchReel(id, {
     render_status: "rendering",
     render_error: null,
     updated_at: Date.now(),
   });
 
-  const outputPath = path.join(RENDER_DIR, `${id}-${nonce}.mp4`);
+  const outputPath = renderOutputPath(id, nonce);
   try {
     await renderReelFile({
       photoFile: reel.photo_file,
@@ -128,17 +133,18 @@ async function renderOne(id: string) {
       durationSec: reel.duration_sec,
       outputPath,
     });
-    const current = getReel(id);
+    const current = await getReel(id);
     if (!current || current.render_nonce !== nonce || current.status !== "draft") {
       fs.rmSync(outputPath, { force: true });
       if (current?.status === "draft") enqueueRender(id);
       return;
     }
     if (current.video_path && current.video_path !== outputPath) {
-      fs.rmSync(current.video_path, { force: true });
+      await removeStoredVideo(current.video_path);
     }
-    patchReel(id, {
-      video_path: outputPath,
+    const stored = await saveRenderedMp4(outputPath, `${id}-${nonce}.mp4`);
+    await patchReel(id, {
+      video_path: stored,
       render_status: "ready",
       render_error: null,
       rendered_line: current.line,
@@ -148,56 +154,66 @@ async function renderOne(id: string) {
     });
   } catch (error) {
     fs.rmSync(outputPath, { force: true });
-    const current = getReel(id);
+    const current = await getReel(id);
     const message = error instanceof Error ? error.message : "The cut failed.";
     if (!current || current.render_nonce !== nonce) {
       if (current?.status === "draft") enqueueRender(id);
       return;
     }
-    patchReel(id, {
+    await patchReel(id, {
       render_status: "error",
-      render_error: message.slice(0, 500),
+      render_error: message.slice(-500),
       updated_at: Date.now(),
     });
   }
 }
 
-export function markForRender(id: string) {
-  const reel = getReel(id);
+export async function markForRender(id: string) {
+  const reel = await getReel(id);
   if (!reel || reel.status !== "draft") return null;
-  const next = patchReel(id, {
+  queued().delete(id);
+  const next = await patchReel(id, {
     render_nonce: reel.render_nonce + 1,
     render_status: "pending",
     render_error: null,
     updated_at: Date.now(),
   });
-  enqueueRender(id);
+  await renderOne(id);
   return next ?? null;
 }
 
-export function fillQueue(extra = 0) {
-  const need = Math.max(0, DRAFT_TARGET - countDrafts()) + extra;
+async function createDrafts(extra = 0) {
+  const need = Math.max(0, DRAFT_TARGET - (await countDrafts())) + extra;
   const ids: string[] = [];
-  for (let i = 0; i < need; i += 1) ids.push(createDraft());
-  for (const id of ids) enqueueRender(id);
+  for (let i = 0; i < need; i += 1) ids.push(await createDraft());
   return ids;
 }
 
-export function bootQueue() {
-  if (globalQueue.instabotBooted) return;
-  globalQueue.instabotBooted = true;
+export async function fillQueue(extra = 0) {
+  const ids = await createDrafts(extra);
+  for (const id of ids) await renderOne(id);
+  return ids;
+}
+
+async function runBoot() {
   ensureDataDirs();
-  purgePublished();
-  getDb()
-    .prepare(
-      "UPDATE reels SET render_status = 'pending' WHERE status = 'draft' AND render_status = 'rendering'",
-    )
-    .run();
-  fillQueue(0);
-  const pending = getDb()
-    .prepare(
-      "SELECT id FROM reels WHERE status = 'draft' AND render_status = 'pending'",
-    )
-    .all() as { id: string }[];
+  await purgePublished();
+  const db = await getSql();
+  await db.run("UPDATE reels SET render_status = 'pending' WHERE status = 'draft' AND render_status = 'rendering'");
+  if (onVercel()) return;
+  await createDrafts(0);
+  const pending = await db.all<{ id: string }>(
+    "SELECT id FROM reels WHERE status = 'draft' AND render_status = 'pending'",
+  );
   for (const row of pending) enqueueRender(row.id);
+}
+
+export function bootQueue() {
+  if (!globalQueue.instabotBoot) {
+    globalQueue.instabotBoot = runBoot().catch((error: unknown) => {
+      globalQueue.instabotBoot = undefined;
+      throw error;
+    });
+  }
+  return globalQueue.instabotBoot;
 }

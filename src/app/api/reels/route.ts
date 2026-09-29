@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { CaptionError } from "@/lib/captions";
 import { DeskError, deskPayload } from "@/lib/desk";
-import { bootQueue, fillQueue } from "@/lib/queue";
+import { onVercel } from "@/lib/media";
+import { bootQueue, createDraft, fillQueue, renderOne } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -13,10 +15,10 @@ function json(data: unknown, status = 200) {
   });
 }
 
-export function GET() {
+export async function GET() {
   try {
-    bootQueue();
-    return json(deskPayload());
+    await bootQueue();
+    return json(await deskPayload());
   } catch (error) {
     const message = error instanceof Error ? error.message : "The desk could not load.";
     return json({ error: message }, 500);
@@ -25,16 +27,18 @@ export function GET() {
 
 export async function POST(request: Request) {
   try {
-    bootQueue();
+    await bootQueue();
     const body = (await request.json().catch(() => ({}))) as { mode?: string };
-    const extra = body.mode === "one" ? 1 : 0;
-    const before = deskPayload().reels.filter((reel) => reel.status === "draft").length;
-    if (extra === 0 && before >= 5) {
-      fillQueue(1);
+    if (onVercel()) {
+      const id = await createDraft();
+      await renderOne(id);
     } else {
-      fillQueue(extra);
+      const extra = body.mode === "one" ? 1 : 0;
+      const before = (await deskPayload()).reels.filter((reel) => reel.status === "draft").length;
+      if (extra === 0 && before >= 5) await fillQueue(1);
+      else await fillQueue(extra);
     }
-    return json(deskPayload());
+    return json(await deskPayload());
   } catch (error) {
     if (error instanceof DeskError || error instanceof CaptionError) {
       return json({ error: error.message }, error.status);

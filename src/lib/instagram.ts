@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-
 const GRAPH = "https://graph.facebook.com/v22.0";
 
 export type PublishResult =
@@ -38,7 +36,7 @@ function sleep(ms: number) {
  * No-ops with not_connected when IG_ACCESS_TOKEN or IG_USER_ID is missing.
  */
 export async function publishReel(
-  filePath: string,
+  video: Buffer,
   caption: string,
   audioId: string | null,
 ): Promise<PublishResult> {
@@ -85,16 +83,15 @@ export async function publishReel(
     return { state: "failed", error: "Instagram did not return an upload id." };
   }
 
-  const bytes = await fs.readFile(filePath);
   const uploadResponse = await fetch(uri, {
     method: "POST",
     headers: {
       Authorization: `OAuth ${token}`,
       offset: "0",
-      file_size: String(bytes.length),
+      file_size: String(video.length),
       "Content-Type": "application/octet-stream",
     },
-    body: new Blob([bytes]),
+    body: new Blob([new Uint8Array(video)]),
   });
   const uploadBody = await readJson(uploadResponse);
   if (!uploadResponse.ok) {

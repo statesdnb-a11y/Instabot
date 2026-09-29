@@ -7,6 +7,12 @@ export const RENDER_DIR = path.join(DATA_DIR, "renders");
 export const DB_PATH = path.join(DATA_DIR, "instabot.db");
 
 export function ensureDataDirs() {
-  fs.mkdirSync(PHOTO_DIR, { recursive: true });
-  fs.mkdirSync(RENDER_DIR, { recursive: true });
+  for (const dir of [PHOTO_DIR, RENDER_DIR]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "EROFS" && code !== "EACCES" && code !== "EPERM") throw error;
+    }
+  }
 }

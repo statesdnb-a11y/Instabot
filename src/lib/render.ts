@@ -1,16 +1,30 @@
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { PHOTO_DIR, RENDER_DIR, ensureDataDirs } from "@/lib/paths";
+import { PHOTO_DIR, ensureDataDirs } from "@/lib/paths";
 import type { Motion } from "@/lib/types";
+
+const require = createRequire(import.meta.url);
 
 const OUT_W = 1080;
 const OUT_H = 1920;
 const FPS = 30;
 const FONT_CANDIDATES = [
+  path.join(process.cwd(), "assets", "NotoSerif-Italic.ttf"),
   "/usr/share/fonts/truetype/noto/NotoSerif-Italic.ttf",
   "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
 ];
+
+function ffmpegBin() {
+  try {
+    const bundled = require("ffmpeg-static") as string | null;
+    if (bundled && fs.existsSync(bundled)) return bundled;
+  } catch {
+    // The system ffmpeg is the local fallback.
+  }
+  return "ffmpeg";
+}
 
 function even(value: number) {
   const rounded = Math.round(value);
@@ -55,7 +69,7 @@ function fontSize(lineCount: number) {
 
 function runFfmpeg(args: string[]) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(ffmpegBin(), args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -92,19 +106,15 @@ export async function renderReelFile(input: {
   const frames = duration * FPS;
   const lines = wrapLine(input.line);
   const size = fontSize(lines.length);
-  const textPath = path.join(
-    RENDER_DIR,
-    `line-${path.basename(input.outputPath, ".mp4")}.txt`,
-  );
-  fs.writeFileSync(textPath, lines.join("\n").replace(/%/g, "%%"), "utf8");
-
-  const font = escapeFilterPath(fontFile());
-  const text = escapeFilterPath(textPath);
+  const assPath = path.join(path.dirname(input.outputPath), `line-${path.basename(input.outputPath, ".mp4")}.ass`);
+  fs.mkdirSync(path.dirname(assPath), { recursive: true });
+  fs.writeFileSync(assPath, assScript(lines, size, duration), "utf8");
+  const subs = escapeFilterPath(assPath);
+  const fonts = escapeFilterPath(path.dirname(fontFile()));
   const type =
     `drawbox=x=0:y=ih*0.58:w=iw:h=ih*0.14:color=black@0.22:t=fill,` +
     `drawbox=x=0:y=ih*0.70:w=iw:h=ih*0.30:color=black@0.48:t=fill,` +
-    `drawtext=fontfile='${font}':textfile='${text}':fontsize=${size}:fontcolor=white:` +
-    `line_spacing=14:x=(w-text_w)/2:y=h-text_h-210:shadowcolor=black@0.7:shadowx=0:shadowy=3,` +
+    `subtitles='${subs}':fontsdir='${fonts}',` +
     `format=yuv420p[v]`;
 
   let video: string;
@@ -156,7 +166,7 @@ export async function renderReelFile(input: {
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      process.env.VERCEL ? "ultrafast" : "veryfast",
       "-crf",
       "21",
       "-pix_fmt",
@@ -174,6 +184,31 @@ export async function renderReelFile(input: {
     fs.rmSync(partial, { force: true });
     throw error;
   } finally {
-    fs.rmSync(textPath, { force: true });
+    fs.rmSync(assPath, { force: true });
   }
+}
+
+function assEscape(text: string) {
+  return text.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}");
+}
+
+function assScript(lines: string[], size: number, duration: number) {
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  const end = `0:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.00`;
+  const body = lines.map(assEscape).join("\\N");
+  return `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Line,Noto Serif,${size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,0,3,2,90,90,210,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,${end},Line,,0,0,0,,${body}
+`;
 }
