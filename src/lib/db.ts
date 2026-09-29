@@ -155,7 +155,20 @@ const SEED_VERBS = [
   "eating",
 ];
 
-const EXTRA_NOUNS = ["gooch", "dog", "teacher", "asshole", "genital", "peepee", "donger"];
+const EXTRA_NOUNS = [
+  "gooch",
+  "dog",
+  "teacher",
+  "asshole",
+  "genital",
+  "peepee",
+  "donger",
+  "beef",
+  "meat",
+  "sausage",
+  "ham",
+  "cheese",
+];
 
 const DROPPED_ADJECTIVES = [
   "nasty",
