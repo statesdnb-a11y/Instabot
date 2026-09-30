@@ -12,6 +12,8 @@ export type StockPhoto = {
   sourceUrl: string;
   license: string;
   licenseUrl: string;
+  /** Public Blob URL when the JPEG is not kept on local disk. */
+  imageUrl?: string;
 };
 
 const LICENSE = "Pexels License";

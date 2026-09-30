@@ -104,6 +104,32 @@ function looksLikeMp4(body: Buffer) {
   return body.length >= 12 && body.subarray(4, 8).toString("ascii") === "ftyp";
 }
 
+function looksLikeJpeg(body: Buffer) {
+  return body.length >= 8000 && body[0] === 0xff && body[1] === 0xd8;
+}
+
+/** Upload a searched still so another instance can still serve the thumbnail. */
+export async function saveStillJpeg(id: string, body: Buffer) {
+  if (!/^\d+$/.test(id) || !looksLikeJpeg(body) || !blobEnabled()) return null;
+  let blob: { url: string };
+  try {
+    blob = await put(`stills/${id}.jpg`, body, {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: "image/jpeg",
+      ...blobCommand(),
+    });
+  } catch {
+    return null;
+  }
+  if (!isPublicBlobUrl(blob.url)) {
+    await del(blob.url, blobCommand()).catch(() => undefined);
+    return null;
+  }
+  return blob.url;
+}
+
 export async function saveRenderedMp4(localPath: string, name: string) {
   if (!blobEnabled()) {
     if (onVercel()) {

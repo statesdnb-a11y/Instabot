@@ -69,6 +69,8 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 
 New reels search Pexels when Creator refreshes or Generate adds a draft. Each search picks a different query from the previous one: goofy couple stock photo, silly couple portrait, playful funny couple, couple making a funny face, awkward couple photo, or couple being silly together. A result is one photo per photographer. Scenic, outdoor, dark, and lifestyle-room photos are dropped. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Set `PEXELS_API_KEY` to use the Pexels API; without it the desk reads the public search pages. Credits for the saved fallback stills live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
 
+On Vercel each new still is stored in the public Blob store. The Creator thumbnail URL is `https://<store>.public.blob.vercel-storage.com/stills/<photo-id>.jpg`, so a later request on another instance still returns the JPEG. Locally the thumbnail stays `/api/stills/<photo-id>`. Creator has a Back control that returns to Drafts.
+
 Creator is a button in the header. It opens the still picker. New stills runs another search. Pick a still and Music 1, Music 2, Music 3, or Music 4. Generate a caption from the templates and word banks, or type one. Each generated line picks a template and words at random, and it will not repeat the line already in the box. Duplicate templates and bank words are removed when the caption list opens. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
 
 ## Music

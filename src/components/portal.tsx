@@ -184,6 +184,7 @@ export function Portal({
 
           <TabsContent value="creator" className="mt-5">
             <Creator
+              onBack={() => setTab("drafts")}
               onCreated={async () => {
                 await load();
                 setTab("drafts");

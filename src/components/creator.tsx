@@ -19,7 +19,7 @@ type Still = {
   imageUrl: string;
 };
 
-export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
+export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>; onBack: () => void }) {
   const [stills, setStills] = useState<Still[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [music, setMusic] = useState<(typeof MUSIC)[number]["id"]>("music-1");
@@ -136,6 +136,11 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
 
   return (
     <section className="grid gap-5">
+      <div className="sticky top-0 z-10 -mx-4 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
+        <Button type="button" variant="outline" className="h-11 w-full px-4 sm:w-auto" onClick={onBack}>
+          Back to Drafts
+        </Button>
+      </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="max-w-xl">
           <h2 className="font-serif text-2xl">Creator</h2>
@@ -143,9 +148,14 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
             A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one, choose Music 1, Music 2, Music 3, or Music 4, and burn in a line.
           </p>
         </div>
-        <Button className="h-11" variant="outline" onClick={() => void refresh()} disabled={loading || refreshing || creating}>
-          {refreshing ? "Loading stills…" : "New stills"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button className="h-11" variant="outline" onClick={onBack} disabled={creating}>
+            Back
+          </Button>
+          <Button className="h-11" variant="outline" onClick={() => void refresh()} disabled={loading || refreshing || creating}>
+            {refreshing ? "Loading stills…" : "New stills"}
+          </Button>
+        </div>
       </div>
 
       {loading ? (

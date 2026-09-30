@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { usageCounts } from "@/lib/db";
+import { blobEnabled, onVercel, saveStillJpeg } from "@/lib/media";
 import { PHOTOS, photoById, pickLeastUsedPhoto, type StockPhoto } from "@/lib/photos";
 import { DATA_DIR, PHOTO_CACHE_DIR, ensureDataDirs } from "@/lib/paths";
 
@@ -224,16 +225,21 @@ export async function searchStudioStills(options: {
     const checked = await Promise.all(
       batch.map(async (candidate) => {
         try {
-          await downloadJpeg(candidate.id);
-          return candidate;
+          const file = await downloadJpeg(candidate.id);
+          const photo = toStock(candidate, displayAuthor(candidate));
+          if (blobEnabled()) {
+            const imageUrl = await saveStillJpeg(candidate.id, fs.readFileSync(file)).catch(() => null);
+            if (imageUrl) photo.imageUrl = imageUrl;
+          }
+          if (onVercel() && !photo.imageUrl) return null;
+          return photo;
         } catch {
           return null;
         }
       }),
     );
-    for (const candidate of checked) {
-      if (!candidate || stills.length >= count) continue;
-      const photo = toStock(candidate, displayAuthor(candidate));
+    for (const photo of checked) {
+      if (!photo || stills.length >= count) continue;
       rememberPhoto(photo);
       stills.push(photo);
     }

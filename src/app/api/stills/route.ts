@@ -26,7 +26,7 @@ export async function GET(request: Request) {
           author: photo.author,
           sourceUrl: photo.sourceUrl,
           license: photo.license,
-          imageUrl: `/api/stills/${photo.id}`,
+          imageUrl: photo.imageUrl ?? `/api/stills/${photo.id}`,
         })),
       },
       { headers: { "Cache-Control": "no-store" } },
