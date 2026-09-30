@@ -14,6 +14,7 @@ import {
   onVercel,
   removeStoredVideo,
   renderOutputPath,
+  safeMediaError,
   saveRenderedMp4,
 } from "@/lib/media";
 import { ensureDataDirs } from "@/lib/paths";
@@ -106,7 +107,11 @@ async function pump() {
     while (queued().size > 0) {
       const id = queued().values().next().value as string;
       queued().delete(id);
-      await renderOne(id);
+      try {
+        await renderOne(id);
+      } catch {
+        // renderOne already stored the message on the row.
+      }
     }
   } finally {
     globalQueue.instabotPumping = false;
@@ -125,6 +130,7 @@ export async function renderOne(id: string) {
   });
 
   const outputPath = renderOutputPath(id, nonce);
+  let removedPrevious = false;
   try {
     await renderReelFile({
       photoFile: reel.photo_file,
@@ -140,6 +146,7 @@ export async function renderOne(id: string) {
       return;
     }
     if (current.video_path && current.video_path !== outputPath) {
+      removedPrevious = true;
       await removeStoredVideo(current.video_path);
     }
     const stored = await saveRenderedMp4(outputPath, `${id}-${nonce}.mp4`);
@@ -155,16 +162,18 @@ export async function renderOne(id: string) {
   } catch (error) {
     fs.rmSync(outputPath, { force: true });
     const current = await getReel(id);
-    const message = error instanceof Error ? error.message : "The cut failed.";
+    const message = safeMediaError(error);
     if (!current || current.render_nonce !== nonce) {
       if (current?.status === "draft") enqueueRender(id);
       return;
     }
     await patchReel(id, {
       render_status: "error",
-      render_error: message.slice(-500),
+      render_error: message,
+      video_path: removedPrevious ? null : current.video_path,
       updated_at: Date.now(),
     });
+    throw new Error(message);
   }
 }
 

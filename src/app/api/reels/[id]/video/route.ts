@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { reelMedia } from "@/lib/desk";
+import { blobPlaybackRedirect, safeMediaError } from "@/lib/media";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,13 +12,19 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+  const download = new URL(request.url).searchParams.get("download") === "1";
   const media = await reelMedia(id, "video");
   if (!media) return new Response("Reel not found.", { status: 404 });
-  if (media.url) return Response.redirect(media.url, 302);
+  if (media.url) {
+    try {
+      return await blobPlaybackRedirect(media.url, download);
+    } catch (error) {
+      return new Response(safeMediaError(error), { status: 502 });
+    }
+  }
   if (!media.file) return new Response("Reel not found.", { status: 404 });
 
   const size = statSync(media.file).size;
-  const download = new URL(request.url).searchParams.get("download") === "1";
   const baseHeaders: Record<string, string> = {
     "Content-Type": media.type,
     "Accept-Ranges": "bytes",

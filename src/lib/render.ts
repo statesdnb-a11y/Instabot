@@ -17,11 +17,28 @@ const FONT_CANDIDATES = [
 ];
 
 function ffmpegBin() {
+  let bundled: string | null = null;
   try {
-    const bundled = require("ffmpeg-static") as string | null;
-    if (bundled && fs.existsSync(bundled)) return bundled;
+    const resolved = require("ffmpeg-static") as string | null;
+    if (resolved && fs.existsSync(resolved)) bundled = resolved;
   } catch {
-    // The system ffmpeg is the local fallback.
+    bundled = null;
+  }
+  if (bundled) {
+    try {
+      fs.accessSync(bundled, fs.constants.X_OK);
+      return bundled;
+    } catch {
+      const copy = "/tmp/instabot-ffmpeg";
+      if (!fs.existsSync(copy)) {
+        fs.copyFileSync(bundled, copy);
+        fs.chmodSync(copy, 0o755);
+      }
+      return copy;
+    }
+  }
+  if (process.env.VERCEL === "1") {
+    throw new Error("ffmpeg is not included on this host, so the reel cannot be cut.");
   }
   return "ffmpeg";
 }
@@ -176,8 +193,8 @@ export async function renderReelFile(input: {
       partial,
     ]);
     const stat = fs.statSync(partial);
-    if (stat.size < 1000) {
-      throw new Error("ffmpeg wrote an empty reel.");
+    if (stat.size < 1000 || !playableMp4(partial)) {
+      throw new Error("ffmpeg did not write a playable mp4.");
     }
     fs.renameSync(partial, input.outputPath);
   } catch (error) {
@@ -185,6 +202,17 @@ export async function renderReelFile(input: {
     throw error;
   } finally {
     fs.rmSync(assPath, { force: true });
+  }
+}
+
+function playableMp4(filePath: string) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const header = Buffer.alloc(12);
+    const read = fs.readSync(fd, header, 0, 12, 0);
+    return read >= 12 && header.subarray(4, 8).toString("ascii") === "ftyp";
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

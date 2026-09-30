@@ -21,7 +21,7 @@ The same Next.js app is what runs on Vercel. Open the deployed URL, click Genera
 
 Generate, New line, New motion, and a saved line edit render inside that request with `ffmpeg-static` and store the mp4 before the response returns. On Vercel each Generate click adds one reel so the render can finish inside a serverless function. Hobby functions stop at 60 seconds.
 
-Local files do not survive a serverless instance. When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are both set, the queue, caption banks, and used captions go to Turso. When `BLOB_READ_WRITE_TOKEN` is set, mp4s go to Vercel Blob. Leave those unset and local dev keeps SQLite in `data/instabot.db` and mp4s in `data/renders/`.
+Local files do not survive a serverless instance. When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are both set, the queue, caption banks, and used captions go to Turso. On Vercel, mp4s go to a public Vercel Blob store. Connect the store so the project gets `instabot_STORE_ID` or `BLOB_STORE_ID`; the app authenticates with OIDC and does not need `BLOB_READ_WRITE_TOKEN`. The store itself must be public, or the browser cannot play the file. Leave Blob unset locally and mp4s stay in `data/renders/`. SQLite stays in `data/instabot.db` when Turso is unset.
 
 There is no in-process timer and no Vercel cron. Approve publishes immediately.
 
@@ -57,7 +57,8 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 | `IG_USER_ID` | No | Instagram professional account id. |
 | `TURSO_DATABASE_URL` | For Vercel | libsql URL for the queue, banks, and used captions. |
 | `TURSO_AUTH_TOKEN` | For Vercel | Turso token. Both Turso variables are required together. |
-| `BLOB_READ_WRITE_TOKEN` | For Vercel | Stores silent mp4s in Vercel Blob. |
+| `instabot_STORE_ID` or `BLOB_STORE_ID` | For Vercel | Public Blob store id. On Vercel the app uploads with OIDC. The preview plays the public Blob URL. |
+| `BLOB_READ_WRITE_TOKEN` | Off Vercel only | Optional static token when OIDC is not available. Not required on Vercel. |
 | `UNSPLASH_ACCESS_KEY` | No | Unused in this version. Stills are bundled. |
 | `PEXELS_API_KEY` | No | Unused in this version. Stills are bundled. |
 

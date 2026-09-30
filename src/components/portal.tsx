@@ -34,6 +34,20 @@ function motionLabel(motion: ReelDTO["motion"]) {
   return motion === "pan" ? "Slow pan" : "Slow zoom";
 }
 
+function downloadHref(videoUrl: string) {
+  try {
+    const url = new URL(videoUrl);
+    if (url.hostname.endsWith(".public.blob.vercel-storage.com")) {
+      url.searchParams.set("download", "1");
+      return url.toString();
+    }
+    if (url.hostname.endsWith(".blob.vercel-storage.com")) return videoUrl;
+  } catch {
+    // Relative file routes keep the query they already have.
+  }
+  return videoUrl.includes("?") ? `${videoUrl}&download=1` : `${videoUrl}?download=1`;
+}
+
 export function Portal({ initial }: { initial: DeskPayload }) {
   const [payload, setPayload] = useState<DeskPayload | null>(initial);
   const [loaded, setLoaded] = useState(true);
@@ -400,7 +414,7 @@ function ReelCard({
           ) : null}
           {reel.videoUrl ? (
             <Button variant="outline" className="h-11" asChild>
-              <a href={`${reel.videoUrl}&download=1`}>Download mp4</a>
+              <a href={downloadHref(reel.videoUrl)}>Download mp4</a>
             </Button>
           ) : null}
         </div>

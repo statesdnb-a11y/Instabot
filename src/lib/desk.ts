@@ -3,7 +3,7 @@ import path from "node:path";
 import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
 import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
-import { onVercel, videoExists } from "@/lib/media";
+import { onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
 import { PHOTO_DIR, RENDER_DIR } from "@/lib/paths";
 import { publishApprovedNow } from "@/lib/publish";
 import { DRAFT_TARGET, fillQueue, markForRender } from "@/lib/queue";
@@ -25,6 +25,23 @@ function audioDto(row: ReelRow): CatalogTrack | null {
   };
 }
 
+async function clientVideoUrl(row: ReelRow) {
+  const kind = storedVideoKind(row.video_path);
+  if (kind === "public-blob") return { url: row.video_path, error: null as string | null };
+  if (kind === "private-blob" && row.video_path) {
+    try {
+      return { url: await presignedBlobReadUrl(row.video_path), error: null as string | null };
+    } catch (error) {
+      return { url: null, error: safeMediaError(error) };
+    }
+  }
+  if (kind === "missing") return { url: null, error: null as string | null };
+  return {
+    url: `/api/reels/${row.id}/video?v=${row.rendered_at ?? row.updated_at}`,
+    error: null as string | null,
+  };
+}
+
 export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
   const hasFile = videoExists(row);
   const inSync =
@@ -32,6 +49,13 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
     hasFile &&
     row.rendered_line === row.line &&
     row.rendered_motion === row.motion;
+  const playback = await clientVideoUrl(row);
+  const renderError =
+    row.render_error ??
+    playback.error ??
+    (row.render_status === "ready" && row.video_path && !hasFile
+      ? "The mp4 is not in storage anymore. Cut this reel again."
+      : null);
   return {
     id: row.id,
     status: row.status,
@@ -51,8 +75,8 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
     motion: row.motion,
     durationSec: row.duration_sec,
     renderStatus: row.render_status,
-    renderError: row.render_error,
-    videoUrl: hasFile ? `/api/reels/${row.id}/video?v=${row.rendered_at ?? row.updated_at}` : null,
+    renderError,
+    videoUrl: playback.url,
     posterUrl: `/api/reels/${row.id}/poster`,
     inSync,
     postState: row.post_state,
@@ -254,8 +278,9 @@ export async function reelMedia(id: string, kind: "video" | "poster") {
     if (!insideDir(file, PHOTO_DIR) || !fs.existsSync(file)) return null;
     return { file, url: null as string | null, type: "image/jpeg" as const, downloadName: null };
   }
-  if (!reel.video_path) return null;
-  if (reel.video_path.startsWith("https://")) {
+  const stored = storedVideoKind(reel.video_path);
+  if (!reel.video_path || stored === "missing") return null;
+  if (stored === "public-blob" || stored === "private-blob") {
     return {
       file: null as string | null,
       url: reel.video_path,
