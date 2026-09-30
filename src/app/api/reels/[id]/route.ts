@@ -36,6 +36,7 @@ export async function POST(
       caption?: unknown;
       captionCustom?: unknown;
       audio?: unknown;
+      track?: unknown;
     };
     switch (body.action) {
       case "update":
@@ -53,7 +54,7 @@ export async function POST(
       case "regenerate-motion":
         return json(await regenerateMotion(id));
       case "change-music":
-        return json(await changeMusic(id));
+        return json(await changeMusic(id, typeof body.track === "string" ? body.track : undefined));
       case "retry-render":
         return json(await retryRender(id));
       case "approve":

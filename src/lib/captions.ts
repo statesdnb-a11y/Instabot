@@ -299,6 +299,125 @@ async function skippedCaptionRanks() {
   return new Map(rows.map((row) => [row.caption_key, row.skipped_at]));
 }
 
+const COOLDOWN_GENERATIONS = 5;
+
+type CaptionCooldown = {
+  captions: Set<string>;
+  templates: Set<string>;
+  nouns: Set<string>;
+  verbs: Set<string>;
+};
+
+async function activeCooldowns(): Promise<CaptionCooldown> {
+  const db = await getSql();
+  const rows = await db.all<{ kind: string; value: string }>(
+    "SELECT kind, value FROM caption_cooldowns WHERE remaining > 0",
+  );
+  const cool: CaptionCooldown = {
+    captions: new Set(),
+    templates: new Set(),
+    nouns: new Set(),
+    verbs: new Set(),
+  };
+  for (const row of rows) {
+    if (row.kind === "caption") cool.captions.add(row.value);
+    else if (row.kind === "template") cool.templates.add(row.value);
+    else if (row.kind === "noun") cool.nouns.add(row.value);
+    else if (row.kind === "verb") cool.verbs.add(row.value);
+  }
+  return cool;
+}
+
+async function rememberCooldown(kind: "caption" | "template" | "noun" | "verb", value: string) {
+  const key = value.trim().toLowerCase();
+  if (!key) return;
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO caption_cooldowns (kind, value, remaining) VALUES (?, ?, ?)
+     ON CONFLICT(kind, value) DO UPDATE SET remaining = ?`,
+    kind,
+    key,
+    COOLDOWN_GENERATIONS,
+    COOLDOWN_GENERATIONS,
+  );
+}
+
+async function tickCooldowns() {
+  const db = await getSql();
+  await db.run("UPDATE caption_cooldowns SET remaining = remaining - 1 WHERE remaining > 0");
+  await db.run("DELETE FROM caption_cooldowns WHERE remaining <= 0");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchTemplate(template: string, line: string) {
+  const parts = template.split(/(\{(?:noun|verb|him\/her|he\/she|his\/her)\})/g);
+  const kinds: Array<"noun" | "verb" | "pronoun"> = [];
+  let pattern = "^";
+  for (const part of parts) {
+    if (part === "{noun}") {
+      pattern += "([A-Za-z]+(?:'[A-Za-z]+)?)";
+      kinds.push("noun");
+    } else if (part === "{verb}") {
+      pattern += "([A-Za-z]+(?:'[A-Za-z]+)?)";
+      kinds.push("verb");
+    } else if (part === "{he/she}") {
+      pattern += "(he|she)";
+      kinds.push("pronoun");
+    } else if (part === "{him/her}") {
+      pattern += "(him|her)";
+      kinds.push("pronoun");
+    } else if (part === "{his/her}") {
+      pattern += "(his|her)";
+      kinds.push("pronoun");
+    } else if (part) {
+      pattern += escapeRegExp(part);
+    }
+  }
+  pattern += "$";
+  const match = new RegExp(pattern, "i").exec(line.trim());
+  if (!match) return null;
+  const nouns: string[] = [];
+  const verbs: string[] = [];
+  kinds.forEach((kind, index) => {
+    const word = match[index + 1]?.toLowerCase();
+    if (!word) return;
+    if (kind === "noun") nouns.push(word);
+    if (kind === "verb") verbs.push(word);
+  });
+  return { nouns, verbs };
+}
+
+export async function beginCaptionCooldown(caption: string) {
+  const key = captionKey(caption);
+  if (!key) return;
+  await rememberCooldown("caption", key);
+  const desk = await captionDesk();
+  let matched: { text: string; nouns: string[]; verbs: string[] } | null = null;
+  for (const template of desk.templates) {
+    const hit = matchTemplate(template.text, caption);
+    if (!hit) continue;
+    if (!matched || template.text.length > matched.text.length) {
+      matched = { text: template.text, nouns: hit.nouns, verbs: hit.verbs };
+    }
+  }
+  if (matched) {
+    await rememberCooldown("template", captionKey(matched.text));
+    for (const noun of matched.nouns) await rememberCooldown("noun", noun);
+    for (const verb of matched.verbs) await rememberCooldown("verb", verb);
+    return;
+  }
+  const words = new Set(key.match(/[a-z]+(?:'[a-z]+)?/g) ?? []);
+  for (const noun of desk.nouns) {
+    if (words.has(noun.text.toLowerCase())) await rememberCooldown("noun", noun.text);
+  }
+  for (const verb of desk.verbs) {
+    if (words.has(verb.text.toLowerCase())) await rememberCooldown("verb", verb.text);
+  }
+}
+
 export async function captionUsedOnCard(id: string, status: string, caption: string) {
   const key = captionKey(caption);
   if (!key) return false;
@@ -384,18 +503,24 @@ export async function nextLine(exclude: string[] = []) {
   if (desk.templates.length === 0) {
     throw new CaptionError("Add a caption template before generating a line.");
   }
-  const nouns = desk.nouns.map((entry) => entry.text);
-  const verbs = desk.verbs.map((entry) => entry.text);
+  const cool = await activeCooldowns();
+  const templates = desk.templates.filter((entry) => !cool.templates.has(captionKey(entry.text)));
+  const nouns = desk.nouns.map((entry) => entry.text).filter((word) => !cool.nouns.has(word.toLowerCase()));
+  const verbs = desk.verbs.map((entry) => entry.text).filter((word) => !cool.verbs.has(word.toLowerCase()));
+  if (templates.length === 0) {
+    throw new CaptionError("The next captions are still on skip cooldown.");
+  }
   const blocked = await blockedCaptionKeys();
   for (const extra of exclude) {
     const key = captionKey(extra);
     if (key) blocked.add(key);
   }
+  for (const key of cool.captions) blocked.add(key);
   const skipped = await skippedCaptionRanks();
   let produced = false;
   let oldestSkipped: { line: string; at: number } | null = null;
   for (let attempt = 0; attempt < 240; attempt += 1) {
-    const template = desk.templates[Math.floor(Math.random() * desk.templates.length)];
+    const template = templates[Math.floor(Math.random() * templates.length)];
     if (!template) break;
     const line = fillOnce(template.text, nouns, verbs);
     if (!line) continue;
@@ -403,10 +528,16 @@ export async function nextLine(exclude: string[] = []) {
     const key = captionKey(line);
     if (!key || blocked.has(key)) continue;
     const skippedAt = skipped.get(key);
-    if (skippedAt === undefined) return line;
+    if (skippedAt === undefined) {
+      await tickCooldowns();
+      return line;
+    }
     if (!oldestSkipped || skippedAt < oldestSkipped.at) oldestSkipped = { line, at: skippedAt };
   }
-  if (oldestSkipped) return oldestSkipped.line;
+  if (oldestSkipped) {
+    await tickCooldowns();
+    return oldestSkipped.line;
+  }
   if (!produced) {
     const needsNoun = desk.templates.some((entry) => entry.text.includes("{noun}"));
     const needsVerb = desk.templates.some((entry) => entry.text.includes("{verb}"));

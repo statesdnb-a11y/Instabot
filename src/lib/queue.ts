@@ -10,6 +10,7 @@ import {
   listReels,
   patchReel,
   purgePublished,
+  noteChosenBedTrack,
   takeNextBedTrack,
   usageCounts,
   type ReelRow,
@@ -101,6 +102,7 @@ export async function createDraft() {
 
 export async function createStudioReel(input: {
   photoId: string;
+  bedTrack?: string;
   caption: string;
   manual: boolean;
 }) {
@@ -109,8 +111,10 @@ export async function createStudioReel(input: {
   const caption = input.caption.trim();
   if (!caption) throw new CaptionError("Write a caption, or generate one.");
   if (caption.length > 220) throw new CaptionError("That caption is too long.");
-  const track = bedTrackById((await takeNextBedTrack()).id);
+  const chosen = input.bedTrack ? bedTrackById(input.bedTrack) : null;
+  const track = chosen ?? bedTrackById((await takeNextBedTrack()).id);
   if (!track) throw new CaptionError("Pick Music 1 through Music 9.");
+  if (chosen) await noteChosenBedTrack(chosen.id);
   const now = Date.now();
   const row: ReelRow = {
     id: crypto.randomUUID(),

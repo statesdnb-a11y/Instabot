@@ -138,6 +138,12 @@ async function openDatabase() {
       caption_key TEXT PRIMARY KEY,
       skipped_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS caption_cooldowns (
+      kind TEXT NOT NULL,
+      value TEXT NOT NULL,
+      remaining INTEGER NOT NULL,
+      PRIMARY KEY (kind, value)
+    );
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -523,6 +529,17 @@ export async function takeNextBedTrack(avoid?: string | null): Promise<BedTrackT
     Date.now(),
   );
   return { id: next.id, cleared };
+}
+
+export async function noteChosenBedTrack(trackId: string) {
+  if (!BED_TRACKS.some((track) => track.id === trackId)) return;
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)
+     ON CONFLICT(track_id) DO UPDATE SET used_at = excluded.used_at`,
+    trackId,
+    Date.now(),
+  );
 }
 
 export async function undoBedTrackTake(take: BedTrackTake) {

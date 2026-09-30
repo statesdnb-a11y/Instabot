@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { captionUsedOnCard, deprioritizeCaption, learnLine, rememberCaption } from "@/lib/captions";
-import { getReel, listReels, patchReel, takeNextBedTrack, undoBedTrackTake, type ReelRow } from "@/lib/db";
+import { beginCaptionCooldown, captionUsedOnCard, deprioritizeCaption, learnLine, rememberCaption } from "@/lib/captions";
+import { getReel, listReels, noteChosenBedTrack, patchReel, takeNextBedTrack, undoBedTrackTake, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
 import { isPublicBlobUrl, onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
@@ -75,6 +75,7 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
       licenseUrl: row.photo_license_url,
     },
     audio: audioDto(row),
+    bedTrack: row.bed_track,
     bedLabel: bedTrackById(row.bed_track)?.label ?? null,
     motion: row.motion,
     durationSec: row.duration_sec,
@@ -208,15 +209,20 @@ export async function regenerateMotion(id: string) {
   return toReelDTO(next);
 }
 
-export async function changeMusic(id: string) {
+export async function changeMusic(id: string, requested?: string) {
   const reel = await requireDraft(id);
   await requireStill(id);
-  const taken = await takeNextBedTrack(reel.bed_track);
-  await patchReel(id, { bed_track: taken.id, updated_at: Date.now() });
+  const chosen = requested ? bedTrackById(requested) : null;
+  if (requested && !chosen) throw new DeskError("Pick Music 1 through Music 9.", 400);
+  if (chosen && chosen.id === reel.bed_track) return toReelDTO(reel);
+  const taken = chosen ? null : await takeNextBedTrack(reel.bed_track);
+  const nextTrack = chosen?.id ?? taken?.id;
+  if (!nextTrack) throw new DeskError("Pick Music 1 through Music 9.", 400);
+  await patchReel(id, { bed_track: nextTrack, updated_at: Date.now() });
   try {
     await markForRender(id);
   } catch (error) {
-    await undoBedTrackTake(taken);
+    if (taken) await undoBedTrackTake(taken);
     const message = error instanceof Error ? error.message : STILL_GONE;
     await patchReel(id, {
       bed_track: reel.bed_track,
@@ -235,6 +241,7 @@ export async function changeMusic(id: string) {
     });
     throw new DeskError(message === STILL_GONE ? STILL_GONE : message, message === STILL_GONE ? 409 : 500);
   }
+  if (chosen) await noteChosenBedTrack(chosen.id);
   const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
@@ -257,7 +264,11 @@ export async function skipReel(id: string) {
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status !== "draft") throw new DeskError("Only a draft can be skipped.", 409);
   await deprioritizeCaption(reel.line);
-  if (reel.caption !== reel.line) await deprioritizeCaption(reel.caption);
+  await beginCaptionCooldown(reel.line);
+  if (reel.caption !== reel.line) {
+    await deprioritizeCaption(reel.caption);
+    await beginCaptionCooldown(reel.caption);
+  }
   await patchReel(id, { status: "skipped", updated_at: Date.now() });
   if (!onVercel()) void fillQueue(0).catch(() => undefined);
   return { ok: true };

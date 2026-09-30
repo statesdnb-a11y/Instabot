@@ -31,6 +31,18 @@ async function postAction(id: string, body: Record<string, unknown>) {
   return data;
 }
 
+const MUSIC = [
+  { id: "music-1", label: "Music 1" },
+  { id: "music-2", label: "Music 2" },
+  { id: "music-3", label: "Music 3" },
+  { id: "music-4", label: "Music 4" },
+  { id: "music-5", label: "Music 5" },
+  { id: "music-6", label: "Music 6" },
+  { id: "music-7", label: "Music 7" },
+  { id: "music-8", label: "Music 8" },
+  { id: "music-9", label: "Music 9" },
+] as const;
+
 function motionLabel(motion: ReelDTO["motion"]) {
   return motion === "pan" ? "Slow pan" : "Slow zoom";
 }
@@ -419,6 +431,20 @@ function ReelCard({
               >
                 {working === "music" ? "Changing music…" : "Change music"}
               </Button>
+              <div className="flex w-full flex-wrap gap-2">
+                {MUSIC.map((track) => (
+                  <Button
+                    key={track.id}
+                    type="button"
+                    variant={reel.bedTrack === track.id ? "default" : "outline"}
+                    className="h-11"
+                    disabled={Boolean(working) || reel.stillMissing || reel.bedTrack === track.id}
+                    onClick={() => void run("music", { action: "change-music", track: track.id })}
+                  >
+                    {track.label}
+                  </Button>
+                ))}
+              </div>
               {reel.renderStatus === "error" && !reel.stillMissing ? (
                 <Button
                   variant="outline"
