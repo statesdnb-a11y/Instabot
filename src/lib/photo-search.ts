@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { usageCounts } from "@/lib/db";
-import { blobEnabled, saveStillJpeg } from "@/lib/media";
+import { blobEnabled, onVercel, saveStillJpeg } from "@/lib/media";
 import { PHOTOS, photoById, pickLeastUsedPhoto, type StockPhoto } from "@/lib/photos";
 import { DATA_DIR, PHOTO_CACHE_DIR, ensureDataDirs } from "@/lib/paths";
 
@@ -231,6 +231,7 @@ export async function searchStudioStills(options: {
             const imageUrl = await saveStillJpeg(candidate.id, fs.readFileSync(file)).catch(() => null);
             if (imageUrl) photo.imageUrl = imageUrl;
           }
+          if (onVercel() && !photo.imageUrl) return null;
           return photo;
         } catch {
           return null;
