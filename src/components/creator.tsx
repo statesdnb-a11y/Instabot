@@ -30,13 +30,20 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadStills = useCallback(async (exclude: string[]) => {
-    const query = exclude.length ? `?exclude=${encodeURIComponent(exclude.join(","))}` : "";
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+
+  const loadStills = useCallback(async (exclude: string[], previous: string | null) => {
+    const params = new URLSearchParams();
+    if (exclude.length) params.set("exclude", exclude.join(","));
+    if (previous) params.set("q", previous);
+    const queryString = params.toString();
+    const query = queryString ? `?${queryString}` : "";
     const response = await fetch(`/api/stills${query}`, { cache: "no-store" });
-    const data = (await response.json().catch(() => ({}))) as { stills?: Still[]; error?: string };
+    const data = (await response.json().catch(() => ({}))) as { stills?: Still[]; query?: string; error?: string };
     if (!response.ok) throw new Error(data.error || "The stills could not load.");
     const next = data.stills ?? [];
     setStills(next);
+    setSearchQuery(data.query ?? null);
     setSelectedId((current) => (current && next.some((still) => still.id === current) ? current : null));
   }, []);
 
@@ -44,7 +51,7 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
     let stop = false;
     const run = async () => {
       try {
-        await loadStills([]);
+        await loadStills([], null);
       } catch (err) {
         if (!stop) setError(err instanceof Error ? err.message : "The stills could not load.");
       } finally {
@@ -61,7 +68,7 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
     setRefreshing(true);
     setError(null);
     try {
-      await loadStills(stills.map((still) => still.id));
+      await loadStills(stills.map((still) => still.id), searchQuery);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The stills could not load.");
     } finally {
@@ -76,7 +83,7 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
       const response = await fetch("/api/captions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate" }),
+        body: JSON.stringify({ action: "generate", text: caption }),
       });
       const data = (await response.json().catch(() => ({}))) as { line?: string; error?: string };
       if (!response.ok || !data.line) throw new Error(data.error || "A line could not be written.");
@@ -132,7 +139,7 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
         <div className="max-w-xl">
           <h2 className="font-serif text-2xl">Creator</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Five candid couples on a white studio background. Pick one, choose Music 1, Music 2, or Music 3, and burn in a line.
+            A new white-studio search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per couple. Pick one, choose Music 1, Music 2, or Music 3, and burn in a line.
           </p>
         </div>
         <Button className="h-11" variant="outline" onClick={() => void refresh()} disabled={loading || refreshing || creating}>

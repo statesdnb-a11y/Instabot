@@ -61,7 +61,36 @@ function clean(value: unknown, max: number, label: string) {
   return text;
 }
 
+async function dedupeCaptionBanks() {
+  const db = await getSql();
+  const templates = await db.all<{ id: string; body: string }>(
+    "SELECT id, body FROM caption_templates ORDER BY position ASC, rowid ASC",
+  );
+  const seenTemplates = new Set<string>();
+  for (const row of templates) {
+    const key = captionKey(row.body);
+    if (!key || seenTemplates.has(key)) {
+      await db.run("DELETE FROM caption_templates WHERE id = ?", row.id);
+      continue;
+    }
+    seenTemplates.add(key);
+  }
+  const words = await db.all<{ id: string; bank: string; word: string }>(
+    "SELECT id, bank, word FROM caption_words ORDER BY position ASC, rowid ASC",
+  );
+  const seenWords = new Set<string>();
+  for (const row of words) {
+    const key = `${row.bank}:${captionKey(row.word)}`;
+    if (seenWords.has(key)) {
+      await db.run("DELETE FROM caption_words WHERE id = ?", row.id);
+      continue;
+    }
+    seenWords.add(key);
+  }
+}
+
 export async function captionDesk(): Promise<CaptionDesk> {
+  await dedupeCaptionBanks();
   const db = await getSql();
   const templates = await db.all<CaptionEntry>(
     "SELECT id, body AS text FROM caption_templates ORDER BY position ASC, rowid ASC",
@@ -79,6 +108,10 @@ export async function captionDesk(): Promise<CaptionDesk> {
 export async function addTemplate(value: unknown) {
   const text = clean(value, MAX_TEMPLATE, "A template");
   const db = await getSql();
+  const existing = await db.all<{ body: string }>("SELECT body FROM caption_templates");
+  if (existing.some((row) => captionKey(row.body) === captionKey(text))) {
+    throw new CaptionError("That template is already in the list.");
+  }
   const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates");
   await db.run("INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)", crypto.randomUUID(), text, (row?.n ?? -1) + 1);
   return captionDesk();
@@ -96,8 +129,10 @@ export async function addWord(bank: unknown, value: unknown) {
   if (bank !== "noun" && bank !== "verb") throw new CaptionError("Pick the noun or verb bank.");
   const text = clean(value, MAX_WORD, "A word");
   const db = await getSql();
-  const existing = await db.get("SELECT 1 AS n FROM caption_words WHERE bank = ? AND word = ?", bank, text);
-  if (existing) throw new CaptionError("That word is already in the bank.");
+  const existing = await db.all<{ word: string }>("SELECT word FROM caption_words WHERE bank = ?", bank);
+  if (existing.some((row) => captionKey(row.word) === captionKey(text))) {
+    throw new CaptionError("That word is already in the bank.");
+  }
   const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_words WHERE bank = ?", bank);
   await db.run(
     "INSERT INTO caption_words (id, bank, word, position) VALUES (?, ?, ?, ?)",
@@ -184,8 +219,8 @@ async function rememberTemplate(body: string) {
   const text = body.trim();
   if (!text || text.length > MAX_TEMPLATE) return;
   const db = await getSql();
-  const existing = await db.get("SELECT 1 AS n FROM caption_templates WHERE body = ?", text);
-  if (existing) return;
+  const existing = await db.all<{ body: string }>("SELECT body FROM caption_templates");
+  if (existing.some((row) => captionKey(row.body) === captionKey(text))) return;
   const row = await db.get<{ n: number }>("SELECT COALESCE(MAX(position), -1) AS n FROM caption_templates");
   await db.run(
     "INSERT INTO caption_templates (id, body, position) VALUES (?, ?, ?)",
@@ -311,29 +346,17 @@ function tokenChoices(token: string, nouns: string[], verbs: string[]) {
   return null;
 }
 
-function* fillsOf(template: string, nouns: string[], verbs: string[]) {
+function fillOnce(template: string, nouns: string[], verbs: string[]) {
   const tokens = template.match(new RegExp(TOKEN.source, "g")) ?? [];
-  if (tokens.length === 0) {
-    yield template;
-    return;
+  if (tokens.length === 0) return template;
+  const picks: string[] = [];
+  for (const token of tokens) {
+    const choices = tokenChoices(token, nouns, verbs);
+    if (!choices || choices.length === 0) return null;
+    picks.push(choices[Math.floor(Math.random() * choices.length)] ?? "");
   }
-  const options = tokens.map((token) => tokenChoices(token, nouns, verbs));
-  if (options.some((option) => !option)) return;
-  const lists = options as string[][];
-  const total = lists.reduce((count, list) => count * list.length, 1);
-  const cap = 4096;
-  const count = Math.min(total, cap);
-  const start = total > cap ? Math.floor(Math.random() * total) : 0;
-  for (let step = 0; step < count; step += 1) {
-    let n = (start + step) % total;
-    const picks: string[] = [];
-    for (const list of lists) {
-      picks.push(list[n % list.length] ?? "");
-      n = Math.floor(n / list.length);
-    }
-    let index = 0;
-    yield template.replace(new RegExp(TOKEN.source, "g"), () => picks[index++] ?? "");
-  }
+  let index = 0;
+  return template.replace(new RegExp(TOKEN.source, "g"), () => picks[index++] ?? "");
 }
 
 export async function nextLine(exclude: string[] = []) {
@@ -348,19 +371,14 @@ export async function nextLine(exclude: string[] = []) {
     const key = captionKey(extra);
     if (key) blocked.add(key);
   }
-  const templates = [...desk.templates];
-  for (let index = templates.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1));
-    const current = templates[index];
-    templates[index] = templates[swap] ?? current;
-    templates[swap] = current;
-  }
   let produced = false;
-  for (const template of templates) {
-    for (const line of fillsOf(template.text, nouns, verbs)) {
-      produced = true;
-      if (!blocked.has(captionKey(line))) return line;
-    }
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const template = desk.templates[Math.floor(Math.random() * desk.templates.length)];
+    if (!template) break;
+    const line = fillOnce(template.text, nouns, verbs);
+    if (!line) continue;
+    produced = true;
+    if (!blocked.has(captionKey(line))) return line;
   }
   if (!produced) {
     const needsNoun = desk.templates.some((entry) => entry.text.includes("{noun}"));

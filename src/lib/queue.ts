@@ -20,7 +20,7 @@ import {
 } from "@/lib/media";
 import { ensureDataDirs } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
-import { PHOTOS, photoById, type StockPhoto } from "@/lib/photos";
+import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
 import { renderReelFile } from "@/lib/render";
 import { bedTrackById, pickBedTrack } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
@@ -39,13 +39,6 @@ function queued() {
   return globalQueue.instabotQueued;
 }
 
-function leastUsed<T extends { id: string }>(items: T[], counts: Map<string, number>) {
-  let best = Number.POSITIVE_INFINITY;
-  for (const item of items) best = Math.min(best, counts.get(item.id) ?? 0);
-  const pool = items.filter((item) => (counts.get(item.id) ?? 0) === best);
-  return pool[Math.floor(Math.random() * pool.length)] ?? items[0];
-}
-
 async function pickMotion(): Promise<Motion> {
   const counts = await usageCounts("motion");
   const zoom = counts.get("zoom") ?? 0;
@@ -56,7 +49,7 @@ async function pickMotion(): Promise<Motion> {
 
 export async function createDraft() {
   const now = Date.now();
-  const photo = leastUsed<StockPhoto>(PHOTOS, await usageCounts("photo_id"));
+  const photo = await takeStudioPhoto();
   const line = await nextLine(await draftLines());
   const row: ReelRow = {
     id: crypto.randomUUID(),
@@ -105,7 +98,7 @@ export async function createStudioReel(input: {
   caption: string;
   manual: boolean;
 }) {
-  const photo = photoById(input.photoId);
+  const photo = findPhoto(input.photoId);
   if (!photo) throw new CaptionError("Pick one of the white-studio stills.");
   const track = bedTrackById(input.bedTrack);
   if (!track) throw new CaptionError("Pick Music 1, Music 2, or Music 3.");

@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       case "flip-word":
         return json(await flipWord(body.id));
       case "generate":
-        return json({ line: await nextLine() });
+        return json({ line: await nextLine(typeof body.text === "string" ? [body.text] : []) });
       default:
         return json({ error: "Unknown action." }, 400);
     }

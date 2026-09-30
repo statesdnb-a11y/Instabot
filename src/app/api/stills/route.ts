@@ -1,25 +1,39 @@
 import { NextResponse } from "next/server";
-import { pickStudioStills } from "@/lib/photos";
+import { searchStudioStills } from "@/lib/photo-search";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const raw = new URL(request.url).searchParams.get("exclude") ?? "";
-  const exclude = raw
+  const params = new URL(request.url).searchParams;
+  const exclude = (params.get("exclude") ?? "")
     .split(",")
     .map((id) => id.trim())
-    .filter(Boolean)
-    .slice(0, 20);
-  const stills = pickStudioStills(exclude, 5).map((photo) => ({
-    id: photo.id,
-    author: photo.author,
-    sourceUrl: photo.sourceUrl,
-    license: photo.license,
-    imageUrl: `/api/stills/${photo.id}`,
-  }));
-  return NextResponse.json(
-    { stills },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+    .filter((id) => /^\d+$/.test(id))
+    .slice(0, 40);
+  const previousQuery = params.get("q");
+  try {
+    const result = await searchStudioStills({
+      exclude,
+      previousQuery,
+      count: 5,
+    });
+    return NextResponse.json(
+      {
+        query: result.query,
+        stills: result.stills.map((photo) => ({
+          id: photo.id,
+          author: photo.author,
+          sourceUrl: photo.sourceUrl,
+          license: photo.license,
+          imageUrl: `/api/stills/${photo.id}`,
+        })),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The photo search did not respond.";
+    return NextResponse.json({ error: message }, { status: 502, headers: { "Cache-Control": "no-store" } });
+  }
 }

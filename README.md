@@ -67,9 +67,9 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 
 ## Stills
 
-New reels use candid couple stills on a plain white or seamless studio background. The search terms are candid couple white background, playful couple white seamless studio, couple full body white backdrop, and two people white studio background. Scenic, outdoor, dark, and lifestyle-room photos are not used for new reels. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Credits also live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
+New reels search Pexels at the moment you ask, instead of reshuffling a saved handful of files. Each search uses a slightly different white-studio query: candid couple white background, playful couple white seamless studio, couple full body white backdrop, two people white studio background, laughing couple high-key white studio, wedding couple white seamless backdrop, smiling couple plain white cyclorama, or affectionate couple white photography studio. A result is one photo per photographer, so the same couple does not fill the row. Scenic, outdoor, dark, and lifestyle-room photos are dropped. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Set `PEXELS_API_KEY` to use the Pexels API; without it the desk reads the public search pages. Drafts already on the desk keep the still they were made with.
 
-Creator shows five of those stills at once. New stills loads five different ones. Pick a still and Music 1, Music 2, or Music 3. Generate a caption from the templates and word banks, or type one. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
+Creator is a button in the header. It opens the still picker. New stills runs another search. Pick a still and Music 1, Music 2, or Music 3. Generate a caption from the templates and word banks, or type one. Each generated line picks a template and words at random, and it will not repeat the line already in the box. Duplicate templates and bank words are removed when the caption list opens. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
 
 ## Music
 

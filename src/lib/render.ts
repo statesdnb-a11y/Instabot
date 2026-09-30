@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { PHOTO_DIR, ensureDataDirs } from "@/lib/paths";
+import { ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { bedTrackPath } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 
@@ -182,8 +182,8 @@ export async function renderReelFile(input: {
   bedTrack?: string | null;
 }) {
   ensureDataDirs();
-  const photoPath = path.join(PHOTO_DIR, input.photoFile);
-  if (!fs.existsSync(photoPath)) {
+  const photoPath = resolvePhotoFile(input.photoFile);
+  if (!photoPath) {
     throw new Error("The still for this reel is missing.");
   }
 

@@ -59,7 +59,7 @@ export function Portal({
   const [payload, setPayload] = useState<DeskPayload | null>(initial);
   const [loaded, setLoaded] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("creator");
+  const [tab, setTab] = useState<Tab>("drafts");
   const [generating, setGenerating] = useState(false);
 
   const load = useCallback(async () => {
@@ -150,6 +150,9 @@ export function Portal({
           </div>
           <div className="flex flex-wrap gap-2">
             <CaptionEditor />
+            <Button className="h-11 px-4" variant={tab === "creator" ? "default" : "outline"} onClick={() => setTab("creator")}>
+              Creator
+            </Button>
             <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
               {generating ? "Generating…" : "Generate"}
             </Button>
@@ -174,8 +177,7 @@ export function Portal({
         </div>
       ) : (
         <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="mt-6">
-          <TabsList className="grid !h-11 w-full grid-cols-3">
-            <TabsTrigger value="creator">Creator</TabsTrigger>
+          <TabsList className="grid !h-11 w-full grid-cols-2">
             <TabsTrigger value="drafts">Drafts {drafts.length}</TabsTrigger>
             <TabsTrigger value="approved">Approved {approved.length}</TabsTrigger>
           </TabsList>
@@ -796,6 +798,16 @@ function CaptionEditor() {
   );
 }
 
+function uniqueEntries(entries: CaptionEntry[]) {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const key = entry.text.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function CaptionGroup({
   label,
   placeholder,
@@ -828,7 +840,7 @@ function CaptionGroup({
         <p className="text-sm text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="grid gap-1">
-          {entries.map((entry) => (
+          {uniqueEntries(entries).map((entry) => (
             <li key={entry.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
               {blanks ? (
                 <TemplateText text={entry.text} disabled={busy} onFlip={(index) => onFlipBlank?.(entry.id, index)} />

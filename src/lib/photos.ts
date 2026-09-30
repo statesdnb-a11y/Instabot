@@ -1,9 +1,7 @@
 /**
- * Stills for new reels. Pexels License.
- * Search terms: candid couple white background, playful couple white seamless
- * studio, couple full body white backdrop, two people white studio background.
+ * Saved stills used when a live Pexels search is unavailable, and for drafts
+ * that already point at these files. New searches do not shuffle this list.
  * Scenic, outdoor, dark, and lifestyle-room photos are not in this set.
- * Existing drafts keep the photo file already stored on the row.
  */
 export type StockPhoto = {
   id: string;
@@ -14,13 +12,6 @@ export type StockPhoto = {
   license: string;
   licenseUrl: string;
 };
-
-export const STUDIO_QUERIES = [
-  "candid couple white background",
-  "playful couple white seamless studio",
-  "couple full body white backdrop",
-  "two people white studio background",
-] as const;
 
 const LICENSE = "Pexels License";
 const LICENSE_URL = "https://www.pexels.com/license/";
@@ -60,21 +51,48 @@ export function photoById(id: string) {
   return PHOTOS.find((photo) => photo.id === id) ?? null;
 }
 
+function shuffle<T>(items: T[]) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    const current = copy[index];
+    copy[index] = copy[swap] ?? current;
+    copy[swap] = current;
+  }
+  return copy;
+}
+
+/** One still per photographer, so a page is not five frames of the same couple. */
 export function pickStudioStills(exclude: string[] = [], count = 5) {
   const blocked = new Set(exclude);
-  const shuffled = [...PHOTOS];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1));
-    const current = shuffled[index];
-    shuffled[index] = shuffled[swap] ?? current;
-    shuffled[swap] = current;
-  }
-  const fresh = shuffled.filter((photo) => !blocked.has(photo.id));
-  const picked = fresh.slice(0, count);
-  if (picked.length >= count) return picked;
-  for (const photo of shuffled) {
+  const picked: StockPhoto[] = [];
+  const seen = new Set<string>();
+  for (const photo of shuffle(PHOTOS)) {
     if (picked.length >= count) break;
-    if (!picked.some((item) => item.id === photo.id)) picked.push(photo);
+    if (blocked.has(photo.id) || seen.has(photo.username)) continue;
+    seen.add(photo.username);
+    picked.push(photo);
   }
   return picked;
+}
+
+export function pickBundledPhoto(counts: Map<string, number>) {
+  const groups = new Map<string, StockPhoto[]>();
+  for (const photo of PHOTOS) {
+    const list = groups.get(photo.username) ?? [];
+    list.push(photo);
+    groups.set(photo.username, list);
+  }
+  let best = Number.POSITIVE_INFINITY;
+  const least: StockPhoto[][] = [];
+  for (const list of groups.values()) {
+    const used = list.reduce((sum, photo) => sum + (counts.get(photo.id) ?? 0), 0);
+    if (used < best) {
+      best = used;
+      least.length = 0;
+    }
+    if (used === best) least.push(list);
+  }
+  const group = least[Math.floor(Math.random() * least.length)] ?? PHOTOS;
+  return group[Math.floor(Math.random() * group.length)] ?? PHOTOS[0];
 }
