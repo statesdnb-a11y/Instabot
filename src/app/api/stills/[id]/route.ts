@@ -12,7 +12,10 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const photo = findPhoto(id);
-  const file = photo ? resolvePhotoFile(photo.file) : null;
+  let file = photo ? resolvePhotoFile(photo.file) : null;
+  // Live search writes studio-${id}.jpg before the index entry is visible.
+  // Render opens that file by name, so the thumbnail has to as well.
+  if (!file && /^\d+$/.test(id)) file = resolvePhotoFile(`studio-${id}.jpg`);
   if (!file) return new Response("Still not found.", { status: 404 });
   const size = statSync(file).size;
   return new Response(Readable.toWeb(createReadStream(file)) as ReadableStream, {
