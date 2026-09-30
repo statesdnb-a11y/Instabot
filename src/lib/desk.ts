@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
+import { captionUsedOnCard, deprioritizeCaption, learnLine, rememberCaption } from "@/lib/captions";
 import { getReel, listReels, patchReel, takeNextBedTrack, undoBedTrackTake, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
@@ -256,6 +256,8 @@ export async function skipReel(id: string) {
   const reel = await getReel(id);
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status !== "draft") throw new DeskError("Only a draft can be skipped.", 409);
+  await deprioritizeCaption(reel.line);
+  if (reel.caption !== reel.line) await deprioritizeCaption(reel.caption);
   await patchReel(id, { status: "skipped", updated_at: Date.now() });
   if (!onVercel()) void fillQueue(0).catch(() => undefined);
   return { ok: true };

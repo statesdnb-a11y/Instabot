@@ -279,6 +279,26 @@ export async function rememberCaption(caption: string) {
   await db.run("INSERT OR IGNORE INTO used_captions (caption_key) VALUES (?)", key);
 }
 
+export async function deprioritizeCaption(caption: string) {
+  const key = captionKey(caption);
+  if (!key) return;
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO skipped_captions (caption_key, skipped_at) VALUES (?, ?)
+     ON CONFLICT(caption_key) DO UPDATE SET skipped_at = excluded.skipped_at`,
+    key,
+    Date.now(),
+  );
+}
+
+async function skippedCaptionRanks() {
+  const db = await getSql();
+  const rows = await db.all<{ caption_key: string; skipped_at: number }>(
+    "SELECT caption_key, skipped_at FROM skipped_captions",
+  );
+  return new Map(rows.map((row) => [row.caption_key, row.skipped_at]));
+}
+
 export async function captionUsedOnCard(id: string, status: string, caption: string) {
   const key = captionKey(caption);
   if (!key) return false;
@@ -371,15 +391,22 @@ export async function nextLine(exclude: string[] = []) {
     const key = captionKey(extra);
     if (key) blocked.add(key);
   }
+  const skipped = await skippedCaptionRanks();
   let produced = false;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  let oldestSkipped: { line: string; at: number } | null = null;
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     const template = desk.templates[Math.floor(Math.random() * desk.templates.length)];
     if (!template) break;
     const line = fillOnce(template.text, nouns, verbs);
     if (!line) continue;
     produced = true;
-    if (!blocked.has(captionKey(line))) return line;
+    const key = captionKey(line);
+    if (!key || blocked.has(key)) continue;
+    const skippedAt = skipped.get(key);
+    if (skippedAt === undefined) return line;
+    if (!oldestSkipped || skippedAt < oldestSkipped.at) oldestSkipped = { line, at: skippedAt };
   }
+  if (oldestSkipped) return oldestSkipped.line;
   if (!produced) {
     const needsNoun = desk.templates.some((entry) => entry.text.includes("{noun}"));
     const needsVerb = desk.templates.some((entry) => entry.text.includes("{verb}"));

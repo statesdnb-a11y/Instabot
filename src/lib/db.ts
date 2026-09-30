@@ -134,6 +134,10 @@ async function openDatabase() {
     CREATE TABLE IF NOT EXISTS used_captions (
       caption_key TEXT PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS skipped_captions (
+      caption_key TEXT PRIMARY KEY,
+      skipped_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
