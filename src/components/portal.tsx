@@ -136,18 +136,18 @@ export function Portal({
             You only approve. Approve publishes the silent reel immediately, and Instagram attaches the music on that call.
           </p>
         </div>
-        <div className="flex flex-col items-start gap-3 sm:items-end">
-          <InstagramConnect
-            desk={payload?.instagram ?? null}
-            notice={instagramNotice}
-            onChange={() => void load()}
-          />
-          <div className="flex flex-wrap gap-2">
+        <div className="flex w-full flex-col items-start gap-3 sm:w-auto sm:items-end">
+          <div className="flex flex-wrap items-center gap-2">
+            <InstagramConnect desk={payload?.instagram ?? null} onChange={() => void load()} />
             <CaptionEditor />
             <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
               {generating ? "Generating…" : "Generate"}
             </Button>
           </div>
+          {payload?.instagram?.setupHint ? (
+            <p className="max-w-md text-sm leading-5 text-foreground">{payload.instagram.setupHint}</p>
+          ) : null}
+          {instagramNotice ? <p className="max-w-md text-sm leading-5 text-destructive">{instagramNotice}</p> : null}
         </div>
       </header>
 
@@ -239,11 +239,9 @@ export function Portal({
 
 function InstagramConnect({
   desk,
-  notice,
   onChange,
 }: {
   desk: InstagramDesk | null;
-  notice: string | null;
   onChange: () => void;
 }) {
   const [disconnecting, setDisconnecting] = useState(false);
@@ -264,34 +262,32 @@ function InstagramConnect({
     }
   }
 
-  return (
-    <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
-      {desk?.connected ? (
-        <>
-          <Badge variant="outline">
-            {desk.username ? `Instagram connected · @${desk.username}` : "Instagram connected"}
-          </Badge>
-          {desk.stored ? (
-            <Button variant="ghost" className="h-9" disabled={disconnecting} onClick={() => void disconnect()}>
-              {disconnecting ? "Disconnecting…" : "Disconnect"}
-            </Button>
-          ) : null}
-        </>
-      ) : desk?.setupHint ? (
-        <div className="rounded-xl border border-border bg-card px-3 py-3 text-left">
-          <Button className="h-11" disabled>
-            Connect Instagram
-          </Button>
-          <p className="mt-2 text-sm leading-5 text-muted-foreground">{desk.setupHint}</p>
-        </div>
-      ) : (
-        <Button className="h-11" asChild>
-          <a href="/api/instagram/connect">Connect Instagram</a>
+  if (desk?.stored) {
+    return (
+      <>
+        <Button className="h-11" type="button">
+          {desk.username ? `Instagram connected · @${desk.username}` : "Instagram connected"}
         </Button>
-      )}
-      {notice ? <p className="text-left text-sm leading-5 text-destructive">{notice}</p> : null}
-      {localError ? <p className="text-left text-sm leading-5 text-destructive">{localError}</p> : null}
-    </div>
+        <Button className="h-11" type="button" variant="outline" disabled={disconnecting} onClick={() => void disconnect()}>
+          {disconnecting ? "Disconnecting…" : "Disconnect"}
+        </Button>
+        {localError ? <p className="w-full text-sm text-destructive">{localError}</p> : null}
+      </>
+    );
+  }
+
+  if (desk?.setupHint) {
+    return (
+      <Button className="h-11" type="button">
+        Connect Instagram
+      </Button>
+    );
+  }
+
+  return (
+    <Button className="h-11" asChild>
+      <a href="/api/instagram/connect">Connect Instagram</a>
+    </Button>
   );
 }
 

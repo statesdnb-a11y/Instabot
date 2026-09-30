@@ -29,7 +29,7 @@ There is no in-process timer and no Vercel cron. Approve publishes immediately.
 
 - 1080×1920, H.264, no audio track, about 8–12 seconds, 30 fps
 - Center-weighted 9:16 crop, then a slow zoom (1.0 → 1.08) or a slow pan that stays near the middle
-- One sentence burned into the top third: larger white type, a dark scrim behind the words, and a dark stroke
+- One sentence burned near the top: large white type with a dark stroke and shadow on the letters
 - The same sentence stored as the Instagram caption, unless you split them
 - Music is not mixed into the file. On publish, Instagram attaches a catalog track
 
