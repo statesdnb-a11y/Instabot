@@ -67,7 +67,7 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 
 ## Stills
 
-Photos are Unsplash License images of two people. Each reel stores the photo id, author, and source page. Credits also live in `src/lib/photos.ts`.
+New reels use candid couple stills on a plain white or seamless studio background. The search terms are candid couple white background, playful couple white seamless studio, couple full body white backdrop, and two people white studio background. Scenic, outdoor, dark, and lifestyle-room photos are not used for new reels. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Credits also live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
 
 ## Music
 

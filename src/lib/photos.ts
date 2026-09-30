@@ -1,7 +1,9 @@
 /**
- * Bundled two-person stills. Unsplash License.
- * Swap this list to change the desk's image set. Optional Unsplash/Pexels
- * API keys are not required and are not called.
+ * Stills for new reels. Pexels License.
+ * Search terms: candid couple white background, playful couple white seamless
+ * studio, couple full body white backdrop, two people white studio background.
+ * Scenic, outdoor, dark, and lifestyle-room photos are not in this set.
+ * Existing drafts keep the photo file already stored on the row.
  */
 export type StockPhoto = {
   id: string;
@@ -13,63 +15,66 @@ export type StockPhoto = {
   licenseUrl: string;
 };
 
+export const STUDIO_QUERIES = [
+  "candid couple white background",
+  "playful couple white seamless studio",
+  "couple full body white backdrop",
+  "two people white studio background",
+] as const;
+
+const LICENSE = "Pexels License";
+const LICENSE_URL = "https://www.pexels.com/license/";
+
+function still(
+  id: string,
+  author: string,
+  username: string,
+  slug: string,
+): StockPhoto {
+  return {
+    id,
+    author,
+    username,
+    file: `studio-${id}.jpg`,
+    sourceUrl: `https://www.pexels.com/photo/${slug}-${id}/`,
+    license: LICENSE,
+    licenseUrl: LICENSE_URL,
+  };
+}
+
 export const PHOTOS: StockPhoto[] = [
-  {
-    id: "PR8V3-7_rY8",
-    author: "Lauren Rader",
-    username: "laurenraderphoto",
-    file: "lauren-rader-boulder.jpg",
-    sourceUrl: "https://unsplash.com/photos/PR8V3-7_rY8",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
-  {
-    id: "X709gAFk81U",
-    author: "Cameron Stewart",
-    username: "cameronstewart",
-    file: "cameron-stewart-waterfall.jpg",
-    sourceUrl: "https://unsplash.com/photos/X709gAFk81U",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
-  {
-    id: "iAncWttLgf4",
-    author: "Hanna Morris",
-    username: "hcmorr",
-    file: "hanna-morris-mugs.jpg",
-    sourceUrl: "https://unsplash.com/photos/iAncWttLgf4",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
-  {
-    id: "FApniXFOJU4",
-    author: "JD Chow",
-    username: "colnago",
-    file: "jd-chow-shore.jpg",
-    sourceUrl: "https://unsplash.com/photos/FApniXFOJU4",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
-  {
-    id: "es-OB2FzzNY",
-    author: "JJ ROCHA",
-    username: "that_person",
-    file: "jj-rocha-kiss.jpg",
-    sourceUrl: "https://unsplash.com/photos/es-OB2FzzNY",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
-  {
-    id: "80_6jJ97c-U",
-    author: "Andrey Câmara",
-    username: "andreycamara",
-    file: "andrey-camara-hug.jpg",
-    sourceUrl: "https://unsplash.com/photos/80_6jJ97c-U",
-    license: "Unsplash License",
-    licenseUrl: "https://unsplash.com/license",
-  },
+  still("8386827", "Darina Belonogova", "darina-belonogova", "woman-in-paranja-dancing-with-a-man"),
+  still("8386823", "Darina Belonogova", "darina-belonogova", "man-hugging-woman-in-black-hijab"),
+  still("8386812", "Darina Belonogova", "darina-belonogova", "man-hugging-a-woman-in-white-long-sleeves"),
+  still("8386828", "Darina Belonogova", "darina-belonogova", "woman-in-paranja-holding-man-s-hand"),
+  still("8386838", "Darina Belonogova", "darina-belonogova", "couple-standing-side-by-side"),
+  still("8386317", "Darina Belonogova", "darina-belonogova", "man-hugging-woman-from-the-back"),
+  still("8386318", "Darina Belonogova", "darina-belonogova", "man-hugging-woman"),
+  still("8386305", "Darina Belonogova", "darina-belonogova", "a-man-and-a-woman-being-playful-in-the-studio"),
+  still("8386251", "Darina Belonogova", "darina-belonogova", "a-couple-standing-near-white-background"),
+  still("8386603", "Darina Belonogova", "darina-belonogova", "a-couple-in-a-hugging-pose"),
+  still("6291115", "SAN Wedding", "san-wedding", "newlywed-couple-posing-for-a-photo"),
 ];
 
 export function photoById(id: string) {
   return PHOTOS.find((photo) => photo.id === id) ?? null;
+}
+
+export function pickStudioStills(exclude: string[] = [], count = 5) {
+  const blocked = new Set(exclude);
+  const shuffled = [...PHOTOS];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    const current = shuffled[index];
+    shuffled[index] = shuffled[swap] ?? current;
+    shuffled[swap] = current;
+  }
+  const fresh = shuffled.filter((photo) => !blocked.has(photo.id));
+  const picked = fresh.slice(0, count);
+  if (picked.length >= count) return picked;
+  for (const photo of shuffled) {
+    if (picked.length >= count) break;
+    if (!picked.some((item) => item.id === photo.id)) picked.push(photo);
+  }
+  return picked;
 }

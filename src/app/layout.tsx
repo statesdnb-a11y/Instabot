@@ -18,7 +18,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Instabot · Reels desk",
+  title: "stockimgcouplegoals",
   description: "A personal desk that drafts relationship reels. You only approve.",
 };
 

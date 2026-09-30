@@ -142,7 +142,7 @@ export function Portal({
         <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-xl">
             <p className="text-xs tracking-[0.22em] text-muted-foreground uppercase">Reels desk</p>
-            <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">Instabot</h1>
+            <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">stockimgcouplegoals</h1>
             <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
               You only approve. New reels and the ones already on the desk play Music 1, Music 2, or Music 3 from the file.
             </p>
