@@ -140,7 +140,7 @@ export function Creator({ onCreated }: { onCreated: () => Promise<void> }) {
         <div className="max-w-xl">
           <h2 className="font-serif text-2xl">Creator</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            A new goofy-couple search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per couple. Pick one, choose Music 1, Music 2, Music 3, or Music 4, and burn in a line.
+            A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one, choose Music 1, Music 2, Music 3, or Music 4, and burn in a line.
           </p>
         </div>
         <Button className="h-11" variant="outline" onClick={() => void refresh()} disabled={loading || refreshing || creating}>

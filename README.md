@@ -63,11 +63,11 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 | `instabot_STORE_ID` or `BLOB_STORE_ID` | For Vercel | Public Blob store id. On Vercel the app uploads with OIDC. The preview plays the public Blob URL. |
 | `BLOB_READ_WRITE_TOKEN` | Off Vercel only | Optional static token when OIDC is not available. Not required on Vercel. |
 | `UNSPLASH_ACCESS_KEY` | No | Unused in this version. Stills are bundled. |
-| `PEXELS_API_KEY` | No | Unused in this version. Stills are bundled. |
+| `PEXELS_API_KEY` | No | Optional Pexels API key for still search. Without it, the desk reads the public search pages. |
 
 ## Stills
 
-New reels use goofy stock photos of a couple. Each Creator refresh cycles to the next search and does not repeat the same wording: goofy couple, funny couple stock photo, silly couple portrait, playful couple laughing, or awkward couple photo. A white seamless, cyclorama, or studio backdrop is not required. A result set is different couples, one photo per photographer, and it is not filled out with a second pose of a couple already shown. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Credits also live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
+New reels search Pexels when Creator refreshes or Generate adds a draft. Each search picks a different query from the previous one: goofy couple stock photo, silly couple portrait, playful funny couple, couple making a funny face, awkward couple photo, or couple being silly together. A result is one photo per photographer. Scenic, outdoor, dark, and lifestyle-room photos are dropped. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Set `PEXELS_API_KEY` to use the Pexels API; without it the desk reads the public search pages. Credits for the saved fallback stills live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
 
 Creator is a button in the header. It opens the still picker. New stills runs another search. Pick a still and Music 1, Music 2, Music 3, or Music 4. Generate a caption from the templates and word banks, or type one. Each generated line picks a template and words at random, and it will not repeat the line already in the box. Duplicate templates and bank words are removed when the caption list opens. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
 

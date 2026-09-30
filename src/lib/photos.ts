@@ -1,7 +1,7 @@
 /**
- * Stills for new reels. Pexels License.
- * Each search cycles to the next goofy-couple query. A page is one photo
- * per couple. Existing drafts keep the photo file already stored on the row.
+ * Saved stills used when a live Pexels search is unavailable, and for drafts
+ * that already point at these files. New searches do not shuffle this list.
+ * Existing drafts keep the photo file already stored on the row.
  */
 export type StockPhoto = {
   id: string;
@@ -13,14 +13,6 @@ export type StockPhoto = {
   license: string;
   licenseUrl: string;
 };
-
-export const STUDIO_QUERIES = [
-  "goofy couple",
-  "funny couple stock photo",
-  "silly couple portrait",
-  "playful couple laughing",
-  "awkward couple photo",
-] as const;
 
 const LICENSE = "Pexels License";
 const LICENSE_URL = "https://www.pexels.com/license/";
@@ -76,40 +68,6 @@ export const PHOTOS: StockPhoto[] = [
 
 export function photoById(id: string) {
   return PHOTOS.find((photo) => photo.id === id) ?? null;
-}
-
-export function nextStudioQuery(previous?: string | null) {
-  const index = STUDIO_QUERIES.findIndex((query) => query === previous);
-  if (index < 0) return STUDIO_QUERIES[0];
-  return STUDIO_QUERIES[(index + 1) % STUDIO_QUERIES.length];
-}
-
-/** Next query, then one still per couple. Does not pad with a second pose of a pair. */
-export function pickStudioStills(exclude: string[] = [], count = 5, previousQuery?: string | null) {
-  const query = nextStudioQuery(previousQuery);
-  const blockedIds = new Set(exclude);
-  const blockedPairs = new Set(PHOTOS.filter((photo) => blockedIds.has(photo.id)).map((photo) => photo.pair));
-  const byPair = new Map<string, StockPhoto[]>();
-  for (const photo of PHOTOS) {
-    if (blockedIds.has(photo.id) || blockedPairs.has(photo.pair)) continue;
-    const list = byPair.get(photo.pair) ?? [];
-    list.push(photo);
-    byPair.set(photo.pair, list);
-  }
-  const pairs = [...byPair.keys()];
-  const queryIndex = Math.max(0, STUDIO_QUERIES.indexOf(query));
-  const stills: StockPhoto[] = [];
-  const seen = new Set<string>();
-  for (let offset = 0; offset < pairs.length && stills.length < count; offset += 1) {
-    const pair = pairs[(offset + queryIndex) % pairs.length];
-    if (!pair || seen.has(pair)) continue;
-    const options = byPair.get(pair) ?? [];
-    const photo = options[queryIndex % options.length];
-    if (!photo) continue;
-    seen.add(pair);
-    stills.push(photo);
-  }
-  return { query, stills };
 }
 
 export function pickLeastUsedPhoto(counts: Map<string, number>) {

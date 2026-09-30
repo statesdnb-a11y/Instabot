@@ -20,8 +20,7 @@ import {
 } from "@/lib/media";
 import { ensureDataDirs } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
-import { findPhoto } from "@/lib/photo-search";
-import { pickLeastUsedPhoto } from "@/lib/photos";
+import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
 import { renderReelFile } from "@/lib/render";
 import { bedTrackById, pickBedTrack } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
@@ -50,7 +49,7 @@ async function pickMotion(): Promise<Motion> {
 
 export async function createDraft() {
   const now = Date.now();
-  const photo = pickLeastUsedPhoto(await usageCounts("photo_id"));
+  const photo = await takeStudioPhoto();
   const line = await nextLine(await draftLines());
   const row: ReelRow = {
     id: crypto.randomUUID(),
@@ -100,7 +99,7 @@ export async function createStudioReel(input: {
   manual: boolean;
 }) {
   const photo = findPhoto(input.photoId);
-  if (!photo) throw new CaptionError("Pick one of the white-studio stills.");
+  if (!photo) throw new CaptionError("Pick one of the stills.");
   const track = bedTrackById(input.bedTrack);
   if (!track) throw new CaptionError("Pick Music 1, Music 2, Music 3, or Music 4.");
   const caption = input.caption.trim();
