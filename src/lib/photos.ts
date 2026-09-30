@@ -1,8 +1,7 @@
 /**
  * Stills for new reels. Pexels License.
- * Each search cycles to the next white-studio query. A page is one photo
- * per couple. Scenic, outdoor, dark, and lifestyle-room photos are not in
- * this set. Existing drafts keep the photo file already stored on the row.
+ * Each search cycles to the next goofy-couple query. A page is one photo
+ * per couple. Existing drafts keep the photo file already stored on the row.
  */
 export type StockPhoto = {
   id: string;
@@ -16,14 +15,11 @@ export type StockPhoto = {
 };
 
 export const STUDIO_QUERIES = [
-  "candid couple white background",
-  "playful couple white seamless studio",
-  "couple full body white backdrop",
-  "two people white studio background",
-  "laughing couple high-key white studio",
-  "wedding couple white seamless backdrop",
-  "smiling couple plain white cyclorama",
-  "affectionate couple white photography studio",
+  "goofy couple",
+  "funny couple stock photo",
+  "silly couple portrait",
+  "playful couple laughing",
+  "awkward couple photo",
 ] as const;
 
 const LICENSE = "Pexels License";
