@@ -1,21 +1,44 @@
 import fs from "node:fs";
 import path from "node:path";
-import { usageCounts } from "@/lib/db";
+import { loadShownStills, rememberShownStill } from "@/lib/db";
 import { blobEnabled, onVercel, saveStillJpeg } from "@/lib/media";
-import { PHOTOS, photoById, pickLeastUsedPhoto, type StockPhoto } from "@/lib/photos";
+import { PHOTOS, photoById, type StockPhoto } from "@/lib/photos";
 import { DATA_DIR, PHOTO_CACHE_DIR, ensureDataDirs } from "@/lib/paths";
 
 const LICENSE = "Pexels License";
 const LICENSE_URL = "https://www.pexels.com/license/";
 
-export const STUDIO_QUERIES = [
-  "goofy couple stock photo",
-  "silly couple portrait",
-  "playful funny couple",
-  "couple making a funny face",
-  "awkward couple photo",
-  "couple being silly together",
-] as const;
+const MOODS = ["goofy", "silly"] as const;
+const TONES = [
+  "playful",
+  "awkward",
+  "funny",
+  "ridiculous",
+  "wacky",
+  "dorky",
+  "cheeky",
+  "clowning",
+  "laughing",
+  "joking",
+  "grinning",
+  "teasing",
+];
+const WHO = ["couple", "young couple", "happy couple", "newlywed couple"];
+const DOING = [
+  "making a funny face",
+  "being silly together",
+  "pulling faces",
+  "sticking tongues out",
+  "hugging and laughing",
+  "posing together",
+  "joking around",
+  "acting ridiculous",
+  "grinning at the camera",
+  "being playful",
+  "crossing their eyes",
+  "making silly faces",
+];
+const SHAPES = ["stock photo", "photo", "portrait", "candid", "picture", "snapshot"];
 
 type Candidate = {
   id: string;
@@ -26,10 +49,28 @@ type Candidate = {
   sourceUrl?: string;
 };
 
-function nextQuery(previous: string | null) {
-  const choices = STUDIO_QUERIES.filter((query) => query !== previous);
-  const pool = choices.length > 0 ? choices : [...STUDIO_QUERIES];
-  return pool[Math.floor(Math.random() * pool.length)] ?? STUDIO_QUERIES[0];
+function pick<T>(items: readonly T[]) {
+  return items[Math.floor(Math.random() * items.length)] ?? items[0];
+}
+
+function freshQuery(previous: string | null) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const mood = pick(MOODS);
+    const tone = pick(TONES);
+    const who = pick(WHO);
+    const doing = pick(DOING);
+    const shape = pick(SHAPES);
+    const built = pick([
+      `${mood} ${who} ${doing}`,
+      `${tone} ${mood} ${who} ${shape}`,
+      `${who} ${doing} ${mood} ${shape}`,
+      `${mood} ${tone} ${who} ${doing}`,
+      `${doing} ${mood} ${who}`,
+    ]);
+    const query = built.replace(/\s+/g, " ").trim();
+    if (query && query !== previous) return query;
+  }
+  return `${pick(MOODS)} ${pick(TONES)} ${pick(WHO)} ${pick(DOING)}`;
 }
 
 function sceneText(candidate: Pick<Candidate, "alt" | "slug">) {
@@ -183,6 +224,10 @@ function toStock(candidate: Candidate, author: string): StockPhoto {
   };
 }
 
+function normUser(username: string) {
+  return username.trim().toLowerCase();
+}
+
 export async function searchStudioStills(options: {
   exclude?: string[];
   previousQuery?: string | null;
@@ -190,9 +235,10 @@ export async function searchStudioStills(options: {
 }) {
   ensureDataDirs();
   const count = options.count ?? 5;
-  const exclude = new Set(options.exclude ?? []);
-  const query = nextQuery(options.previousQuery ?? null);
-  const page = 1 + Math.floor(Math.random() * 3);
+  const shown = await loadShownStills();
+  for (const id of options.exclude ?? []) {
+    if (/^\d+$/.test(id)) shown.ids.add(id);
+  }
   const key = process.env.PEXELS_API_KEY?.trim();
   async function loadPage(term: string, pageNumber: number) {
     if (key) {
@@ -201,58 +247,74 @@ export async function searchStudioStills(options: {
     }
     return searchJina(term, pageNumber);
   }
-  const pooled: Candidate[] = [];
-  const seenId = new Set<string>();
-  const addAll = (batch: Candidate[]) => {
-    for (const candidate of batch) {
-      if (seenId.has(candidate.id)) continue;
-      seenId.add(candidate.id);
-      pooled.push(candidate);
-    }
-  };
-  addAll(await loadPage(query, page));
-  if (pooled.length < 8) addAll(await loadPage(query, page === 1 ? 2 : 1));
   const stills: StockPhoto[] = [];
   const seenUser = new Set<string>();
-  let tried = 0;
-  for (let index = 0; index < pooled.length && stills.length < count && tried < 12; index += 4) {
-    const batch = pooled.slice(index, index + 4).filter((candidate) => {
-      if (!/^\d+$/.test(candidate.id) || exclude.has(candidate.id) || seenUser.has(candidate.username)) return false;
-      seenUser.add(candidate.username);
-      return true;
-    });
-    tried += batch.length;
-    const checked = await Promise.all(
-      batch.map(async (candidate) => {
-        try {
-          const file = await downloadJpeg(candidate.id);
-          const photo = toStock(candidate, displayAuthor(candidate));
-          if (blobEnabled()) {
-            const imageUrl = await saveStillJpeg(candidate.id, fs.readFileSync(file)).catch(() => null);
-            if (imageUrl) photo.imageUrl = imageUrl;
-          }
-          if (onVercel() && !photo.imageUrl) return null;
-          return photo;
-        } catch {
-          return null;
+  let query = options.previousQuery ?? "";
+  for (let attempt = 0; attempt < 4 && stills.length < count; attempt += 1) {
+    query = freshQuery(query);
+    const page = 1 + Math.floor(Math.random() * 4);
+    const pooled: Candidate[] = [];
+    const seenId = new Set<string>();
+    const addAll = (batch: Candidate[]) => {
+      for (const candidate of batch) {
+        if (seenId.has(candidate.id)) continue;
+        seenId.add(candidate.id);
+        pooled.push(candidate);
+      }
+    };
+    addAll(await loadPage(query, page));
+    if (pooled.length < 8) addAll(await loadPage(query, page === 1 ? 2 : 1));
+    let tried = 0;
+    for (let index = 0; index < pooled.length && stills.length < count && tried < 12; index += 4) {
+      const batch = pooled.slice(index, index + 4).filter((candidate) => {
+        const username = normUser(candidate.username);
+        if (!/^\d+$/.test(candidate.id) || shown.ids.has(candidate.id) || shown.usernames.has(username) || seenUser.has(username)) {
+          return false;
         }
-      }),
-    );
-    for (const photo of checked) {
-      if (!photo || stills.length >= count) continue;
-      rememberPhoto(photo);
-      stills.push(photo);
+        seenUser.add(username);
+        return true;
+      });
+      tried += batch.length;
+      const checked = await Promise.all(
+        batch.map(async (candidate) => {
+          try {
+            const file = await downloadJpeg(candidate.id);
+            const photo = toStock(candidate, displayAuthor(candidate));
+            if (blobEnabled()) {
+              const imageUrl = await saveStillJpeg(candidate.id, fs.readFileSync(file)).catch(() => null);
+              if (imageUrl) photo.imageUrl = imageUrl;
+            }
+            if (onVercel() && !photo.imageUrl) return null;
+            return photo;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const photo of checked) {
+        if (!photo || stills.length >= count) continue;
+        rememberPhoto(photo);
+        await rememberShownStill(photo.id, photo.username);
+        shown.ids.add(photo.id);
+        shown.usernames.add(normUser(photo.username));
+        stills.push(photo);
+      }
     }
   }
   if (stills.length === 0) {
-    const saved = pickStudioStillsFallback(exclude, count);
+    const saved = pickStudioStillsFallback(shown, count);
+    for (const photo of saved) {
+      await rememberShownStill(photo.id, photo.username);
+      shown.ids.add(photo.id);
+      shown.usernames.add(normUser(photo.username));
+    }
     if (saved.length === 0) throw new Error("The photo search did not return a couple.");
     return { query, stills: saved, live: false };
   }
   return { query, stills, live: true };
 }
 
-function pickStudioStillsFallback(exclude: Set<string>, count: number) {
+function pickStudioStillsFallback(shown: { ids: Set<string>; usernames: Set<string> }, count: number) {
   const picked: StockPhoto[] = [];
   const seen = new Set<string>();
   const bundled = [...PHOTOS];
@@ -264,27 +326,17 @@ function pickStudioStillsFallback(exclude: Set<string>, count: number) {
   }
   for (const photo of bundled) {
     if (picked.length >= count) break;
-    if (exclude.has(photo.id) || seen.has(photo.username)) continue;
-    seen.add(photo.username);
+    const username = normUser(photo.username);
+    if (shown.ids.has(photo.id) || shown.usernames.has(username) || seen.has(username)) continue;
+    seen.add(username);
     picked.push(photo);
   }
   return picked;
 }
 
-let freshPool: StockPhoto[] = [];
-let freshQuery = "";
-
 export async function takeStudioPhoto() {
-  if (freshPool.length === 0) {
-    try {
-      const batch = await searchStudioStills({ count: 5, previousQuery: freshQuery || null });
-      freshPool = batch.stills;
-      freshQuery = batch.query;
-    } catch {
-      freshPool = [];
-    }
-  }
-  const photo = freshPool.shift();
-  if (photo) return photo;
-  return pickLeastUsedPhoto(await usageCounts("photo_id"));
+  const batch = await searchStudioStills({ count: 1 });
+  const photo = batch.stills[0];
+  if (!photo) throw new Error("The photo search did not return a couple.");
+  return photo;
 }

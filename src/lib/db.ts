@@ -137,6 +137,11 @@ async function openDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS shown_stills (
+      photo_id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      shown_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS instagram_connection (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       access_token TEXT NOT NULL,
@@ -145,8 +150,24 @@ async function openDatabase() {
       connected_at INTEGER NOT NULL
     );
   `);
+  await rememberReelsAsShown(db);
   await forgetApprovedHistory(db);
   return db;
+}
+
+async function rememberReelsAsShown(db: Sql) {
+  const rows = await db.all<{ photo_id: string; photo_username: string; created_at: number }>(
+    "SELECT photo_id, photo_username, created_at FROM reels",
+  );
+  for (const row of rows) {
+    if (!/^\d+$/.test(row.photo_id) || !row.photo_username?.trim()) continue;
+    await db.run(
+      "INSERT OR IGNORE INTO shown_stills (photo_id, username, shown_at) VALUES (?, ?, ?)",
+      row.photo_id,
+      row.photo_username.trim(),
+      row.created_at,
+    );
+  }
 }
 
 /** One-shot on the next open so a Vercel deploy clears live Turso without a token here. */
@@ -422,6 +443,33 @@ export async function saveInstagramConnection(input: {
 export async function clearInstagramConnection() {
   const db = await getSql();
   await db.run("DELETE FROM instagram_connection WHERE id = 1");
+}
+
+export async function loadShownStills() {
+  const db = await getSql();
+  const rows = await db.all<{ photo_id: string; username: string }>("SELECT photo_id, username FROM shown_stills");
+  const ids = new Set<string>();
+  const usernames = new Set<string>();
+  for (const row of rows) {
+    if (row.photo_id) ids.add(row.photo_id);
+    const username = row.username?.trim().toLowerCase();
+    if (username) usernames.add(username);
+  }
+  return { ids, usernames };
+}
+
+export async function rememberShownStill(photoId: string, username: string) {
+  if (!/^\d+$/.test(photoId)) return;
+  const name = username.trim();
+  if (!name) return;
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO shown_stills (photo_id, username, shown_at) VALUES (?, ?, ?)
+     ON CONFLICT(photo_id) DO UPDATE SET username = excluded.username, shown_at = excluded.shown_at`,
+    photoId,
+    name,
+    Date.now(),
+  );
 }
 
 export async function claimBedTrack(id: string, trackId: string) {
