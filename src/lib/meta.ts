@@ -85,31 +85,79 @@ export function oauthStateMatches(expected: string, got: string) {
   return Boolean(expected) && safeEqual(expected, got);
 }
 
+const PAGE_FIELDS =
+  "id,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}";
+const PAGE_IG_FIELDS = "instagram_business_account{id,username},connected_instagram_account{id,username}";
+
 type ProfessionalAccount = {
   igUserId: string;
   token: string;
   username: string | null;
 };
 
-export function pickProfessionalAccount(body: unknown, userToken: string): ProfessionalAccount | null {
-  if (!body || typeof body !== "object" || !("data" in body)) return null;
+type PageRecord = {
+  id?: unknown;
+  access_token?: unknown;
+  instagram_business_account?: unknown;
+  connected_instagram_account?: unknown;
+};
+
+function readIg(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const ig = value as { id?: unknown; username?: unknown };
+  const igUserId = typeof ig.id === "string" ? ig.id : "";
+  if (!/^\d+$/.test(igUserId)) return null;
+  const username =
+    typeof ig.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(ig.username) ? ig.username : null;
+  return { igUserId, username };
+}
+
+function instagramOnRecord(record: unknown) {
+  if (!record || typeof record !== "object") return null;
+  const row = record as PageRecord;
+  return readIg(row.instagram_business_account) ?? readIg(row.connected_instagram_account);
+}
+
+function accountFromRecord(record: PageRecord, userToken: string): ProfessionalAccount | null {
+  const ig = instagramOnRecord(record);
+  if (!ig) return null;
+  const pageToken = typeof record.access_token === "string" ? record.access_token : "";
+  const token = usableToken(pageToken) ?? usableToken(userToken);
+  if (!token) return null;
+  return { igUserId: ig.igUserId, token, username: ig.username };
+}
+
+function pageRows(body: unknown): PageRecord[] {
+  if (!body || typeof body !== "object" || !("data" in body)) return [];
   const data = (body as { data?: unknown }).data;
-  if (!Array.isArray(data)) return null;
-  for (const row of data) {
-    if (!row || typeof row !== "object") continue;
-    const page = row as {
-      access_token?: unknown;
-      instagram_business_account?: { id?: unknown; username?: unknown };
-    };
-    const ig = page.instagram_business_account;
-    const igUserId = typeof ig?.id === "string" ? ig.id : "";
-    if (!/^\d+$/.test(igUserId)) continue;
-    const pageToken = typeof page.access_token === "string" ? page.access_token.trim() : "";
-    const token = usableToken(pageToken) ?? usableToken(userToken);
-    if (!token) continue;
-    const username =
-      typeof ig?.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(ig.username) ? ig.username : null;
-    return { igUserId, token, username };
+  if (!Array.isArray(data)) return [];
+  return data.filter((row): row is PageRecord => Boolean(row) && typeof row === "object");
+}
+
+function pickProfessionalAccount(body: unknown, userToken: string): ProfessionalAccount | null {
+  for (const row of pageRows(body)) {
+    const account = accountFromRecord(row, userToken);
+    if (account) return account;
+  }
+  return null;
+}
+
+function instagramIdFromDebugToken(body: unknown) {
+  if (!body || typeof body !== "object") return null;
+  const data = (body as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return null;
+  const scopes = (data as { granular_scopes?: unknown }).granular_scopes;
+  if (!Array.isArray(scopes)) return null;
+  for (const scopeName of ["instagram_basic", "instagram_content_publish"]) {
+    for (const scope of scopes) {
+      if (!scope || typeof scope !== "object") continue;
+      if ((scope as { scope?: unknown }).scope !== scopeName) continue;
+      const ids = (scope as { target_ids?: unknown }).target_ids;
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        if (typeof id === "string" && /^\d+$/.test(id)) return id;
+      }
+    }
   }
   return null;
 }
@@ -127,11 +175,48 @@ function tokenFrom(body: unknown) {
   return usableToken(value);
 }
 
+function quoteWideIntegers(text: string) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i] ?? "";
+    if (inString) {
+      out += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char >= "0" && char <= "9") {
+      let end = i;
+      while (end < text.length && (text[end] ?? "") >= "0" && (text[end] ?? "") <= "9") end += 1;
+      const digits = text.slice(i, end);
+      const previous = out.trimEnd().at(-1);
+      const structural = previous === ":" || previous === "[" || previous === ",";
+      out += digits.length >= 16 && structural ? `"${digits}"` : digits;
+      i = end - 1;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+function parseGraphJson(text: string) {
+  return JSON.parse(quoteWideIntegers(text)) as unknown;
+}
+
 async function readGraph(response: Response) {
   const text = await response.text();
   if (!text) return {};
   try {
-    return JSON.parse(text) as unknown;
+    return parseGraphJson(text);
   } catch {
     return {};
   }
@@ -149,11 +234,26 @@ async function postForm(body: URLSearchParams) {
   return tokenFrom(json);
 }
 
-async function findProfessionalAccount(userToken: string): Promise<ProfessionalAccount | "exchange" | "no_account"> {
+async function graphGet(pathname: string, token: string, fields: string) {
+  const url = new URL(`${GRAPH}/${pathname}`);
+  url.searchParams.set("fields", fields);
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return { ok: response.ok, body: await readGraph(response) };
+}
+
+async function findProfessionalAccount(
+  userToken: string,
+  appId: string,
+  appSecret: string,
+): Promise<ProfessionalAccount | "exchange" | "no_account"> {
+  const pagesMissingIg: { id: string; token: string }[] = [];
   let after = "";
   for (let page = 0; page < 4; page += 1) {
     const url = new URL(`${GRAPH}/me/accounts`);
-    url.searchParams.set("fields", "access_token,instagram_business_account{id,username}");
+    url.searchParams.set("fields", PAGE_FIELDS);
     url.searchParams.set("limit", "25");
     if (after) url.searchParams.set("after", after);
     const response = await fetch(url, {
@@ -164,11 +264,45 @@ async function findProfessionalAccount(userToken: string): Promise<ProfessionalA
     if (!response.ok) return "exchange";
     const picked = pickProfessionalAccount(body, userToken);
     if (picked) return picked;
+    for (const row of pageRows(body)) {
+      const id = typeof row.id === "string" && /^\d+$/.test(row.id) ? row.id : "";
+      const token = typeof row.access_token === "string" ? usableToken(row.access_token) : null;
+      if (!id || !token || instagramOnRecord(row)) continue;
+      pagesMissingIg.push({ id, token });
+    }
     const cursor = (body as { paging?: { cursors?: { after?: unknown } } }).paging?.cursors?.after;
-    if (typeof cursor !== "string" || !cursor || cursor === after) return "no_account";
+    if (typeof cursor !== "string" || !cursor || cursor === after) break;
     after = cursor;
   }
-  return "no_account";
+
+  for (const page of pagesMissingIg) {
+    const result = await graphGet(page.id, page.token, PAGE_IG_FIELDS);
+    if (!result.ok || !result.body || typeof result.body !== "object") continue;
+    const ig = instagramOnRecord(result.body);
+    if (!ig) continue;
+    return { igUserId: ig.igUserId, token: page.token, username: ig.username };
+  }
+
+  const igUserId = await grantedInstagramUserId(userToken, appId, appSecret);
+  const token = usableToken(userToken);
+  if (!igUserId || !token) return igUserId ? "exchange" : "no_account";
+  return { igUserId, token, username: await instagramUsername(igUserId, token) };
+}
+
+async function grantedInstagramUserId(userToken: string, appId: string, appSecret: string) {
+  const url = new URL(`${GRAPH}/debug_token`);
+  url.searchParams.set("input_token", userToken);
+  url.searchParams.set("access_token", `${appId}|${appSecret}`);
+  const response = await fetch(url, { cache: "no-store" });
+  const body = await readGraph(response);
+  if (!response.ok) return null;
+  return instagramIdFromDebugToken(body);
+}
+
+async function instagramUsername(igUserId: string, token: string) {
+  const result = await graphGet(igUserId, token, "username");
+  if (!result.ok) return null;
+  return readIg({ id: igUserId, username: (result.body as { username?: unknown }).username })?.username ?? null;
 }
 
 export async function completeInstagramLogin(code: string): Promise<"ok" | "exchange" | "no_account"> {
@@ -195,7 +329,7 @@ export async function completeInstagramLogin(code: string): Promise<"ok" | "exch
       }),
     );
     const userToken = longLived ?? shortLived;
-    const account = await findProfessionalAccount(userToken);
+    const account = await findProfessionalAccount(userToken, appId, secret);
     if (account === "exchange" || account === "no_account") return account;
     await saveInstagramConnection({
       accessToken: account.token,
