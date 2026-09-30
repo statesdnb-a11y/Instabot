@@ -110,7 +110,7 @@ export async function createStudioReel(input: {
   if (!caption) throw new CaptionError("Write a caption, or generate one.");
   if (caption.length > 220) throw new CaptionError("That caption is too long.");
   const track = bedTrackById((await takeNextBedTrack()).id);
-  if (!track) throw new CaptionError("Pick Music 1 through Music 8.");
+  if (!track) throw new CaptionError("Pick Music 1 through Music 9.");
   const now = Date.now();
   const row: ReelRow = {
     id: crypto.randomUUID(),
