@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { attachMissingBedAudio } from "@/lib/bed";
 import {
   countDrafts,
   draftLines,
@@ -20,6 +21,7 @@ import {
 import { ensureDataDirs } from "@/lib/paths";
 import { PHOTOS, type StockPhoto } from "@/lib/photos";
 import { renderReelFile } from "@/lib/render";
+import { pickBedTrack } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
 
@@ -74,6 +76,7 @@ export async function createDraft() {
     audio_artwork_url: null,
     audio_preview_url: null,
     audio_duration_ms: null,
+    bed_track: pickBedTrack().id,
     motion: await pickMotion(),
     duration_sec: 8 + Math.floor(Math.random() * 5),
     video_path: null,
@@ -138,6 +141,7 @@ export async function renderOne(id: string) {
       motion: reel.motion,
       durationSec: reel.duration_sec,
       outputPath,
+      bedTrack: reel.bed_track,
     });
     const current = await getReel(id);
     if (!current || current.render_nonce !== nonce || current.status !== "draft") {
@@ -209,6 +213,7 @@ async function runBoot() {
   await purgePublished();
   const db = await getSql();
   await db.run("UPDATE reels SET render_status = 'pending' WHERE status = 'draft' AND render_status = 'rendering'");
+  await attachMissingBedAudio();
   if (onVercel()) return;
   await createDrafts(0);
   const pending = await db.all<{ id: string }>(

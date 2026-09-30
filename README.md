@@ -1,6 +1,6 @@
 # Instabot
 
-A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short silent vertical reel. Instagram attaches a track from its licensed catalog when you approve.
+A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short vertical reel with Music 1, Music 2, or Music 3 mixed into the file.
 
 ## Run it locally
 
@@ -13,7 +13,7 @@ The desk listens on [http://127.0.0.1:43123](http://127.0.0.1:43123) (`0.0.0.0:4
 
 The first local launch fills five drafts and renders them one at a time in the background. Generate on this machine tops the queue back up to five and waits until each new file is written. A 10 second 1080×1920 cut usually takes a few seconds.
 
-Copy `.env.example` to `.env.local` if you want a passphrase, Instagram publishing, or hosted storage. With nothing set, the desk is open, the reels stay silent, and approving records the reel as not connected instead of posting.
+Copy `.env.example` to `.env.local` if you want a passphrase, Instagram publishing, or hosted storage. With nothing set, the desk is open and approving records the reel as not connected instead of posting. Connect Instagram stays at the top of the header. If `META_APP_ID`, `META_APP_SECRET`, or `META_REDIRECT_URI` is missing, the button stays there and names them.
 
 ## Hosted site
 
@@ -71,17 +71,17 @@ Photos are Unsplash License images of two people. Each reel stores the photo id,
 
 ## Music
 
-The local file stays silent. Music comes from Instagram’s official licensed catalog and is attached at publish time. The desk does not download, store, trim, or burn that audio into the mp4.
+Music 1, Music 2, and Music 3 live in `assets/music`. Each new reel picks one at random and mixes it into the mp4, looped or trimmed to the reel length. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.
 
 Search is `GET https://graph.facebook.com/v22.0/ig_audio?audio_type=music&user_id={ig-user-id}`. Omit `search_query` for trending; the portal search box sends it. On publish, `POST /{ig-user-id}/media` includes `media_type=REELS` and `audio_configuration={"audio_id":"...","audio_volume":100,"video_volume":0}`.
 
 A browser `<audio>` element may play the temporary preview URL. That URL is not saved as a file and is not muxed into the reel. Meta does not support previewing the published reel with the attached audio.
 
-Without a stored login or both `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works, the reel stays silent, and the UI says music attaches once the professional account is connected.
+Without a stored login or both `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works and approving does not post. The mp4 still has its Music 1, Music 2, or Music 3 track.
 
 ## Posting to Instagram
 
-Approve publishes immediately. It creates the media container then, uploads the silent mp4, sets `audio_configuration` to the chosen `audio_id` (or the first trending track if none was picked) with `video_volume` 0, then calls `media_publish` with `creation_id` only.
+Approve publishes immediately. For a reel with Music 1, Music 2, or Music 3, it uploads that mp4 and does not send `audio_configuration`. The file’s audio is what Instagram keeps. A reel with no bed track still uses the catalog path: `audio_configuration` with `video_volume` 0. Then `media_publish` is called with `creation_id` only.
 
 `media_publish` has no schedule time. This desk does not call Facebook Page `scheduled_publish_time`. That is a different product. There is no 8-hour timer and no cron.
 

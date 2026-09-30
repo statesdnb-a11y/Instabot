@@ -62,7 +62,7 @@ export async function instagramDesk(): Promise<InstagramDesk> {
     connected: hasStored || hasEnv,
     username: stored?.username ?? null,
     stored: hasStored,
-    setupHint: hasStored || missing.length === 0 ? null : missingMetaMessage(missing),
+    setupHint: missing.length === 0 ? null : missingMetaMessage(missing),
   };
 }
 

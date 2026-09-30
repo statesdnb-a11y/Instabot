@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { PHOTO_DIR, ensureDataDirs } from "@/lib/paths";
+import { bedTrackPath } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 
 const require = createRequire(import.meta.url);
@@ -127,12 +128,58 @@ function runFfmpeg(args: string[]) {
   });
 }
 
+export async function muxBedAudio(videoPath: string, bedTrack: string, outputPath: string) {
+  const audioPath = bedTrackPath(bedTrack);
+  const partial = `${outputPath}.part.mp4`;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  try {
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      videoPath,
+      "-stream_loop",
+      "-1",
+      "-i",
+      audioPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      partial,
+    ]);
+    if (!playableMp4(partial) || !(await fileHasAudio(partial))) {
+      throw new Error("The reel was saved without its music track.");
+    }
+    fs.renameSync(partial, outputPath);
+  } catch (error) {
+    fs.rmSync(partial, { force: true });
+    throw error;
+  }
+}
+
 export async function renderReelFile(input: {
   photoFile: string;
   line: string;
   motion: Motion;
   durationSec: number;
   outputPath: string;
+  bedTrack?: string | null;
 }) {
   ensureDataDirs();
   const photoPath = path.join(PHOTO_DIR, input.photoFile);
@@ -172,6 +219,7 @@ export async function renderReelFile(input: {
       `scale=${OUT_W}:${OUT_H}:flags=bilinear,${type}`;
   }
 
+  const audioPath = input.bedTrack ? bedTrackPath(input.bedTrack) : null;
   const partial = `${input.outputPath}.part.mp4`;
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
   try {
@@ -186,11 +234,12 @@ export async function renderReelFile(input: {
       String(FPS),
       "-i",
       photoPath,
+      ...(audioPath ? ["-stream_loop", "-1", "-i", audioPath] : []),
       "-filter_complex",
       video,
       "-map",
       "[v]",
-      "-an",
+      ...(audioPath ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2"] : ["-an"]),
       "-t",
       String(duration),
       "-r",
@@ -208,8 +257,8 @@ export async function renderReelFile(input: {
       partial,
     ]);
     const stat = fs.statSync(partial);
-    if (stat.size < 1000 || !playableMp4(partial)) {
-      throw new Error("ffmpeg did not write a playable mp4.");
+    if (stat.size < 1000 || !playableMp4(partial) || (audioPath && !(await fileHasAudio(partial)))) {
+      throw new Error(audioPath ? "ffmpeg did not write the music into the mp4." : "ffmpeg did not write a playable mp4.");
     }
     fs.renameSync(partial, input.outputPath);
   } catch (error) {
@@ -218,6 +267,18 @@ export async function renderReelFile(input: {
   } finally {
     fs.rmSync(assPath, { force: true });
   }
+}
+
+function fileHasAudio(filePath: string) {
+  return new Promise<boolean>((resolve) => {
+    const child = spawn(
+      ffmpegBin(),
+      ["-hide_banner", "-loglevel", "error", "-i", filePath, "-map", "0:a:0", "-f", "null", "-t", "0.2", "-"],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
 }
 
 function playableMp4(filePath: string) {

@@ -1,17 +1,24 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { facebookLoginUrl, missingMetaEnv, missingMetaMessage, STATE_COOKIE, stateCookieOptions } from "@/lib/meta";
+import { facebookLoginUrl, missingMetaEnv, STATE_COOKIE, stateCookieOptions } from "@/lib/meta";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+function deskHome(request: Request) {
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const host = forwardedHost?.split(",")[0]?.trim() || request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const proto = forwardedProto || new URL(request.url).protocol.replace(":", "");
+  return host ? new URL("/", `${proto}://${host}`) : new URL("/", request.url);
+}
+
+export async function GET(request: Request) {
   const missing = missingMetaEnv();
   if (missing.length > 0) {
-    return NextResponse.json(
-      { error: missingMetaMessage(missing) },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
+    const url = deskHome(request);
+    url.searchParams.set("instagram_error", "config");
+    return NextResponse.redirect(url);
   }
   const state = randomBytes(24).toString("hex");
   const response = NextResponse.redirect(facebookLoginUrl(state));

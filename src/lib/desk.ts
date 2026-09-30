@@ -9,6 +9,7 @@ import { PHOTO_DIR, RENDER_DIR } from "@/lib/paths";
 import { publishApprovedNow } from "@/lib/publish";
 import { DRAFT_TARGET, fillQueue, markForRender } from "@/lib/queue";
 import type { CatalogTrack, DeskPayload, Motion, ReelDTO } from "@/lib/types";
+import { bedTrackById } from "@/lib/tracks";
 import { nextLine } from "@/lib/voice";
 
 const MAX_LINE = 220;
@@ -73,6 +74,7 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
       licenseUrl: row.photo_license_url,
     },
     audio: audioDto(row),
+    bedLabel: bedTrackById(row.bed_track)?.label ?? null,
     motion: row.motion,
     durationSec: row.duration_sec,
     renderStatus: row.render_status,

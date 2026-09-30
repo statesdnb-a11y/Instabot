@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { CatalogTrack, DeskPayload, InstagramDesk, ReelDTO } from "@/lib/types";
+import type { CatalogTrack, DeskPayload, ReelDTO } from "@/lib/types";
 
 type Tab = "drafts" | "approved";
 
@@ -128,26 +128,31 @@ export function Portal({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-6 sm:px-6 sm:py-10">
-      <header className="flex flex-col gap-5 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div className="max-w-xl">
-          <p className="text-xs tracking-[0.22em] text-muted-foreground uppercase">Reels desk</p>
-          <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">Instabot</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
-            You only approve. Approve publishes the silent reel immediately, and Instagram attaches the music on that call.
-          </p>
-        </div>
-        <div className="flex w-full flex-col items-start gap-3 sm:w-auto sm:items-end">
-          <div className="flex flex-wrap items-center gap-2">
-            <InstagramConnect desk={payload?.instagram ?? null} onChange={() => void load()} />
+      <header className="border-b border-border pb-6">
+        <a
+          href="/api/instagram/connect"
+          className="inline-flex h-11 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
+        >
+          Connect Instagram
+        </a>
+        {payload?.instagram?.setupHint ? (
+          <p className="mt-3 max-w-xl text-sm leading-5 text-foreground">{payload.instagram.setupHint}</p>
+        ) : null}
+        {instagramNotice ? <p className="mt-3 max-w-xl text-sm leading-5 text-destructive">{instagramNotice}</p> : null}
+        <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-xl">
+            <p className="text-xs tracking-[0.22em] text-muted-foreground uppercase">Reels desk</p>
+            <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">Instabot</h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
+              You only approve. New reels and the ones already on the desk play Music 1, Music 2, or Music 3 from the file.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <CaptionEditor />
             <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
               {generating ? "Generating…" : "Generate"}
             </Button>
           </div>
-          {payload?.instagram?.setupHint ? (
-            <p className="max-w-md text-sm leading-5 text-foreground">{payload.instagram.setupHint}</p>
-          ) : null}
-          {instagramNotice ? <p className="max-w-md text-sm leading-5 text-destructive">{instagramNotice}</p> : null}
         </div>
       </header>
 
@@ -180,7 +185,7 @@ export function Portal({
             {drafts.length === 0 ? (
               <Empty
                 title="The desk is clear."
-                body="Generate a reel and it will land here with a line and a still. The file stays silent until Instagram attaches a catalog track at publish."
+                body="Generate a reel and it will land here with a line, a still, and Music 1, Music 2, or Music 3 in the file."
                 action={
                   <Button className="h-11" onClick={() => void generate()} disabled={generating}>
                     Generate
@@ -206,9 +211,8 @@ export function Portal({
           <TabsContent value="approved" className="mt-5 grid gap-4">
             {!payload?.instagramConnected ? (
               <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
-                Instagram isn&apos;t connected, so approving keeps the silent file here and does not post.
-                Music attaches once a professional account is connected via Facebook Login
-                (instagram_basic, instagram_content_publish, and a linked Page).
+                Instagram isn&apos;t connected, so approving keeps the file here and does not post.
+                The music is already in the mp4. Publish does not swap it for a catalog track.
               </p>
             ) : (
               <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
@@ -234,60 +238,6 @@ export function Portal({
         </Tabs>
       )}
     </div>
-  );
-}
-
-function InstagramConnect({
-  desk,
-  onChange,
-}: {
-  desk: InstagramDesk | null;
-  onChange: () => void;
-}) {
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-
-  async function disconnect() {
-    setDisconnecting(true);
-    setLocalError(null);
-    try {
-      const response = await fetch("/api/instagram/connection", { method: "DELETE" });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Could not disconnect Instagram.");
-      onChange();
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : "Could not disconnect Instagram.");
-    } finally {
-      setDisconnecting(false);
-    }
-  }
-
-  if (desk?.stored) {
-    return (
-      <>
-        <Button className="h-11" type="button">
-          {desk.username ? `Instagram connected · @${desk.username}` : "Instagram connected"}
-        </Button>
-        <Button className="h-11" type="button" variant="outline" disabled={disconnecting} onClick={() => void disconnect()}>
-          {disconnecting ? "Disconnecting…" : "Disconnect"}
-        </Button>
-        {localError ? <p className="w-full text-sm text-destructive">{localError}</p> : null}
-      </>
-    );
-  }
-
-  if (desk?.setupHint) {
-    return (
-      <Button className="h-11" type="button">
-        Connect Instagram
-      </Button>
-    );
-  }
-
-  return (
-    <Button className="h-11" asChild>
-      <a href="/api/instagram/connect">Connect Instagram</a>
-    </Button>
   );
 }
 
@@ -370,6 +320,7 @@ function ReelCard({
         <div className="flex flex-wrap items-center gap-2">
           {reel.usedBefore ? <Badge>Used before</Badge> : null}
           <Badge variant="secondary">{motionLabel(reel.motion)}</Badge>
+          {reel.bedLabel ? <Badge>{reel.bedLabel}</Badge> : null}
           <Badge variant="outline">{reel.durationSec}s</Badge>
           {reel.status === "approved" && reel.postState === "not_connected" ? (
             <Badge variant="outline">Not connected</Badge>
@@ -398,12 +349,19 @@ function ReelCard({
           · {reel.photo.license}
         </p>
 
-        <MusicChoice
-          reel={reel}
-          connected={connected}
-          disabled={Boolean(working)}
-          onPick={(track) => void run("audio", { action: "set-audio", audio: track })}
-        />
+        {reel.bedLabel ? (
+          <p className="text-sm leading-6">
+            <span className="text-foreground">{reel.bedLabel}. </span>
+            <span className="text-muted-foreground">Play uses the audio in this file. Publish keeps it and does not attach a catalog track.</span>
+          </p>
+        ) : (
+          <MusicChoice
+            reel={reel}
+            connected={connected}
+            disabled={Boolean(working)}
+            onPick={(track) => void run("audio", { action: "set-audio", audio: track })}
+          />
+        )}
 
         {reel.renderError ? (
           <p className="text-sm text-destructive">{reel.renderError}</p>
@@ -413,8 +371,7 @@ function ReelCard({
 
         {reel.status === "approved" && reel.postState === "not_connected" ? (
           <p className="text-sm leading-6 text-muted-foreground">
-            Saved as approved. The file is silent and nothing was posted. Music attaches once the
-            professional account is connected via Facebook Login. Approve does not schedule a later send.
+            Saved as approved. Nothing was posted. The music in the file stays with the reel. Approve does not schedule a later send.
           </p>
         ) : null}
 

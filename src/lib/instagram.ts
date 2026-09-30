@@ -52,11 +52,13 @@ export async function publishReel(
   video: Buffer,
   caption: string,
   audioId: string | null,
+  options?: { keepFileAudio?: boolean },
 ): Promise<PublishResult> {
   const creds = await instagramCredentials();
   if (!creds) return { state: "not_connected" };
   const { token, userId } = creds;
-  if (!audioId) {
+  const keepFileAudio = Boolean(options?.keepFileAudio);
+  if (!keepFileAudio && !audioId) {
     return { state: "failed", error: "A catalog track is required before the container is created." };
   }
 
@@ -64,7 +66,7 @@ export async function publishReel(
   form.set("media_type", "REELS");
   form.set("upload_type", "resumable");
   form.set("caption", caption);
-  if (audioId) {
+  if (!keepFileAudio && audioId) {
     form.set(
       "audio_configuration",
       JSON.stringify({

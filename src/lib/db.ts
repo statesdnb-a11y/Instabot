@@ -36,6 +36,7 @@ export type ReelRow = {
   post_state: PostState;
   post_error: string | null;
   ig_media_id: string | null;
+  bed_track: string | null;
   created_at: number;
   updated_at: number;
   approved_at: number | null;
@@ -87,6 +88,7 @@ async function openDatabase() {
       post_state TEXT,
       post_error TEXT,
       ig_media_id TEXT,
+      bed_track TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       approved_at INTEGER,
@@ -99,6 +101,10 @@ async function openDatabase() {
     );
     INSERT OR IGNORE INTO schedule (id, next_publish_at) VALUES (1, NULL);
   `);
+  const reelColumns = await db.all<{ name: string }>("PRAGMA table_info(reels)");
+  if (reelColumns.length > 0 && !reelColumns.some((column) => column.name === "bed_track")) {
+    await db.exec("ALTER TABLE reels ADD COLUMN bed_track TEXT");
+  }
   const hadCaptions = await db.get(
     "SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = 'caption_templates'",
   );
@@ -333,14 +339,14 @@ export async function insertReel(row: ReelRow) {
       audio_id, audio_title, audio_artist, audio_artwork_url, audio_preview_url, audio_duration_ms,
       motion, duration_sec, video_path, render_status, render_error, render_nonce,
       rendered_line, rendered_motion, rendered_at,
-      post_state, post_error, ig_media_id, created_at, updated_at, approved_at, posted_at
+      post_state, post_error, ig_media_id, bed_track, created_at, updated_at, approved_at, posted_at
     ) VALUES (
       @id, @status, @line, @caption, @caption_custom,
       @photo_id, @photo_author, @photo_username, @photo_source_url, @photo_license, @photo_license_url, @photo_file,
       @audio_id, @audio_title, @audio_artist, @audio_artwork_url, @audio_preview_url, @audio_duration_ms,
       @motion, @duration_sec, @video_path, @render_status, @render_error, @render_nonce,
       @rendered_line, @rendered_motion, @rendered_at,
-      @post_state, @post_error, @ig_media_id, @created_at, @updated_at, @approved_at, @posted_at
+      @post_state, @post_error, @ig_media_id, @bed_track, @created_at, @updated_at, @approved_at, @posted_at
     )`,
     row,
   );
@@ -384,6 +390,17 @@ export async function saveInstagramConnection(input: {
 export async function clearInstagramConnection() {
   const db = await getSql();
   await db.run("DELETE FROM instagram_connection WHERE id = 1");
+}
+
+export async function claimBedTrack(id: string, trackId: string) {
+  const db = await getSql();
+  const result = await db.run(
+    "UPDATE reels SET bed_track = ?, updated_at = ? WHERE id = ? AND bed_track IS NULL",
+    trackId,
+    Date.now(),
+    id,
+  );
+  return result.changes === 1;
 }
 
 export async function patchReel(id: string, fields: Partial<ReelRow>) {

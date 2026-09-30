@@ -31,6 +31,7 @@ export type ReelDTO = {
     licenseUrl: string;
   };
   audio: CatalogTrack | null;
+  bedLabel: string | null;
   motion: Motion;
   durationSec: number;
   renderStatus: RenderStatus;

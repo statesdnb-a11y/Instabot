@@ -2,6 +2,7 @@ import { searchMusic } from "@/lib/audio";
 import { deleteReel, getReel, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected, publishReel } from "@/lib/instagram";
 import { readVideoBytes, videoExists } from "@/lib/media";
+import { bedTrackById } from "@/lib/tracks";
 
 export async function publishApprovedNow(id: string) {
   const reel = await getReel(id);
@@ -15,7 +16,7 @@ async function publishDue(reel: ReelRow) {
   if (reel.render_status !== "ready" || !videoExists(reel) || !reel.video_path) {
     await patchReel(reel.id, {
       post_state: "failed",
-      post_error: "The silent reel file was not ready to publish.",
+      post_error: "The reel file was not ready to publish.",
       updated_at: Date.now(),
     });
     return;
@@ -24,6 +25,29 @@ async function publishDue(reel: ReelRow) {
     await patchReel(reel.id, {
       post_state: "not_connected",
       post_error: null,
+      updated_at: Date.now(),
+    });
+    return;
+  }
+
+  if (bedTrackById(reel.bed_track)) {
+    const bytes = await readVideoBytes(reel.video_path);
+    const result = await publishReel(bytes, reel.caption, null, { keepFileAudio: true });
+    if (result.state === "posted") {
+      await deleteReel(reel.id);
+      return;
+    }
+    if (result.state === "not_connected") {
+      await patchReel(reel.id, {
+        post_state: "not_connected",
+        post_error: null,
+        updated_at: Date.now(),
+      });
+      return;
+    }
+    await patchReel(reel.id, {
+      post_state: "failed",
+      post_error: result.error,
       updated_at: Date.now(),
     });
     return;
