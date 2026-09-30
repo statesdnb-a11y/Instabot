@@ -1,18 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const DATA_DIR = path.join(process.cwd(), "data");
-export const PHOTO_DIR = path.join(DATA_DIR, "photos");
-export const RENDER_DIR = path.join(DATA_DIR, "renders");
-export const DB_PATH = path.join(DATA_DIR, "instabot.db");
+const bundledData = path.join(process.cwd(), "data");
+const scratch = path.join("/tmp", "instabot");
+
+function onVercel() {
+  return process.env.VERCEL === "1";
+}
+
+function tursoConfigured() {
+  return Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
+}
+
+/** Bundled stills. Read-only on Vercel. Never create this directory there. */
+export const PHOTO_DIR = path.join(bundledData, "photos");
+
+export const DATA_DIR = onVercel() ? scratch : bundledData;
+
+export const RENDER_DIR = onVercel() ? path.join(scratch, "renders") : path.join(bundledData, "renders");
+
+export const DB_PATH =
+  onVercel() && !tursoConfigured() ? path.join(scratch, "instabot.db") : path.join(bundledData, "instabot.db");
 
 export function ensureDataDirs() {
-  for (const dir of [PHOTO_DIR, RENDER_DIR]) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST" && code !== "EROFS" && code !== "EACCES" && code !== "EPERM") throw error;
-    }
+  if (onVercel()) {
+    fs.mkdirSync(RENDER_DIR, { recursive: true });
+    if (!tursoConfigured()) fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    return;
   }
+  fs.mkdirSync(PHOTO_DIR, { recursive: true });
+  fs.mkdirSync(RENDER_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 }
