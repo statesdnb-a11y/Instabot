@@ -15,9 +15,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Creator } from "@/components/creator";
 import type { CatalogTrack, DeskPayload, ReelDTO } from "@/lib/types";
 
-type Tab = "drafts" | "approved";
+type Tab = "creator" | "drafts" | "approved";
 
 async function postAction(id: string, body: Record<string, unknown>) {
   const response = await fetch(`/api/reels/${id}`, {
@@ -58,7 +59,7 @@ export function Portal({
   const [payload, setPayload] = useState<DeskPayload | null>(initial);
   const [loaded, setLoaded] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("drafts");
+  const [tab, setTab] = useState<Tab>("creator");
   const [generating, setGenerating] = useState(false);
 
   const load = useCallback(async () => {
@@ -173,10 +174,20 @@ export function Portal({
         </div>
       ) : (
         <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="mt-6">
-          <TabsList className="grid !h-11 w-full grid-cols-2">
+          <TabsList className="grid !h-11 w-full grid-cols-3">
+            <TabsTrigger value="creator">Creator</TabsTrigger>
             <TabsTrigger value="drafts">Drafts {drafts.length}</TabsTrigger>
             <TabsTrigger value="approved">Approved {approved.length}</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="creator" className="mt-5">
+            <Creator
+              onCreated={async () => {
+                await load();
+                setTab("drafts");
+              }}
+            />
+          </TabsContent>
 
           <TabsContent value="drafts" className="mt-5 grid gap-4">
             <p className="text-sm text-muted-foreground">

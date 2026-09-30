@@ -19,9 +19,10 @@ import {
   saveRenderedMp4,
 } from "@/lib/media";
 import { ensureDataDirs } from "@/lib/paths";
-import { PHOTOS, type StockPhoto } from "@/lib/photos";
+import { CaptionError } from "@/lib/captions";
+import { PHOTOS, photoById, type StockPhoto } from "@/lib/photos";
 import { renderReelFile } from "@/lib/render";
-import { pickBedTrack } from "@/lib/tracks";
+import { bedTrackById, pickBedTrack } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
 
@@ -77,6 +78,61 @@ export async function createDraft() {
     audio_preview_url: null,
     audio_duration_ms: null,
     bed_track: pickBedTrack().id,
+    motion: await pickMotion(),
+    duration_sec: 8 + Math.floor(Math.random() * 5),
+    video_path: null,
+    render_status: "pending",
+    render_error: null,
+    render_nonce: 1,
+    rendered_line: null,
+    rendered_motion: null,
+    rendered_at: null,
+    post_state: null,
+    post_error: null,
+    ig_media_id: null,
+    created_at: now,
+    updated_at: now,
+    approved_at: null,
+    posted_at: null,
+  };
+  await insertReel(row);
+  return row.id;
+}
+
+export async function createStudioReel(input: {
+  photoId: string;
+  bedTrack: string;
+  caption: string;
+  manual: boolean;
+}) {
+  const photo = photoById(input.photoId);
+  if (!photo) throw new CaptionError("Pick one of the white-studio stills.");
+  const track = bedTrackById(input.bedTrack);
+  if (!track) throw new CaptionError("Pick Music 1, Music 2, or Music 3.");
+  const caption = input.caption.trim();
+  if (!caption) throw new CaptionError("Write a caption, or generate one.");
+  if (caption.length > 220) throw new CaptionError("That caption is too long.");
+  const now = Date.now();
+  const row: ReelRow = {
+    id: crypto.randomUUID(),
+    status: "draft",
+    line: caption,
+    caption,
+    caption_custom: input.manual ? 1 : 0,
+    photo_id: photo.id,
+    photo_author: photo.author,
+    photo_username: photo.username,
+    photo_source_url: photo.sourceUrl,
+    photo_license: photo.license,
+    photo_license_url: photo.licenseUrl,
+    photo_file: photo.file,
+    audio_id: null,
+    audio_title: null,
+    audio_artist: null,
+    audio_artwork_url: null,
+    audio_preview_url: null,
+    audio_duration_ms: null,
+    bed_track: track.id,
     motion: await pickMotion(),
     duration_sec: 8 + Math.floor(Math.random() * 5),
     video_path: null,

@@ -69,6 +69,8 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 
 New reels use candid couple stills on a plain white or seamless studio background. The search terms are candid couple white background, playful couple white seamless studio, couple full body white backdrop, and two people white studio background. Scenic, outdoor, dark, and lifestyle-room photos are not used for new reels. The stills are Pexels License images. Each reel stores the photo id, author, and source page. Credits also live in `src/lib/photos.ts`. Drafts already on the desk keep the still they were made with.
 
+Creator shows five of those stills at once. New stills loads five different ones. Pick a still and Music 1, Music 2, or Music 3. Generate a caption from the templates and word banks, or type one. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
+
 ## Music
 
 Music 1, Music 2, and Music 3 live in `assets/music`. Each new reel picks one at random and mixes it into the mp4, looped or trimmed to the reel length. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.

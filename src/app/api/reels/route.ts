@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { CaptionError } from "@/lib/captions";
 import { DeskError, deskPayload } from "@/lib/desk";
 import { onVercel } from "@/lib/media";
-import { bootQueue, createDraft, fillQueue, renderOne } from "@/lib/queue";
+import { bootQueue, createDraft, createStudioReel, fillQueue, renderOne } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,7 +28,23 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await bootQueue();
-    const body = (await request.json().catch(() => ({}))) as { mode?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      mode?: string;
+      photoId?: unknown;
+      bedTrack?: unknown;
+      caption?: unknown;
+      manual?: unknown;
+    };
+    if (body.mode === "create") {
+      const id = await createStudioReel({
+        photoId: typeof body.photoId === "string" ? body.photoId : "",
+        bedTrack: typeof body.bedTrack === "string" ? body.bedTrack : "",
+        caption: typeof body.caption === "string" ? body.caption : "",
+        manual: body.manual === true,
+      });
+      await renderOne(id);
+      return json(await deskPayload());
+    }
     if (onVercel()) {
       const id = await createDraft();
       await renderOne(id);

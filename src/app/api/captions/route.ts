@@ -8,6 +8,7 @@ import {
   deleteWord,
   flipBlank,
   flipWord,
+  nextLine,
 } from "@/lib/captions";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +52,8 @@ export async function POST(request: Request) {
         return json(await flipBlank(body.id, body.index));
       case "flip-word":
         return json(await flipWord(body.id));
+      case "generate":
+        return json({ line: await nextLine() });
       default:
         return json({ error: "Unknown action." }, 400);
     }
