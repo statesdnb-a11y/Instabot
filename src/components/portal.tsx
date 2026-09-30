@@ -378,7 +378,7 @@ function ReelCard({
         )}
 
         {reel.stillMissing ? (
-          <p className="text-sm text-destructive">The still for this reel is missing.</p>
+          <p className="text-sm text-destructive">This reel's still is already gone.</p>
         ) : reel.renderError ? (
           <p className="text-sm text-destructive">{reel.renderError}</p>
         ) : null}
@@ -685,7 +685,7 @@ function EditLine({
             </div>
           ) : null}
           {reel.stillMissing ? (
-            <p className="text-sm text-destructive">The still for this reel is missing.</p>
+            <p className="text-sm text-destructive">This reel's still is already gone.</p>
           ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
