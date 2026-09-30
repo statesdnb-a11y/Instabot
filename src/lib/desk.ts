@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
-import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
+import { getReel, listReels, patchReel, takeNextBedTrack, undoBedTrackTake, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
 import { isPublicBlobUrl, onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
@@ -208,6 +208,38 @@ export async function regenerateMotion(id: string) {
   return toReelDTO(next);
 }
 
+export async function changeMusic(id: string) {
+  const reel = await requireDraft(id);
+  await requireStill(id);
+  const taken = await takeNextBedTrack(reel.bed_track);
+  await patchReel(id, { bed_track: taken.id, updated_at: Date.now() });
+  try {
+    await markForRender(id);
+  } catch (error) {
+    await undoBedTrackTake(taken);
+    const message = error instanceof Error ? error.message : STILL_GONE;
+    await patchReel(id, {
+      bed_track: reel.bed_track,
+      line: reel.line,
+      caption: reel.caption,
+      caption_custom: reel.caption_custom,
+      motion: reel.motion,
+      render_status: reel.render_status,
+      render_error: message === STILL_GONE ? STILL_GONE : reel.render_error,
+      render_nonce: reel.render_nonce,
+      video_path: reel.video_path,
+      rendered_line: reel.rendered_line,
+      rendered_motion: reel.rendered_motion,
+      rendered_at: reel.rendered_at,
+      updated_at: Date.now(),
+    });
+    throw new DeskError(message === STILL_GONE ? STILL_GONE : message, message === STILL_GONE ? 409 : 500);
+  }
+  const next = await getReel(id);
+  if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
+  return toReelDTO(next);
+}
+
 export async function retryRender(id: string) {
   const reel = await requireDraft(id);
   await requireStill(id);
@@ -302,6 +334,7 @@ async function rerenderOrRestore(id: string, previous: ReelRow) {
       render_error: STILL_GONE,
       render_nonce: previous.render_nonce,
       video_path: previous.video_path,
+      bed_track: previous.bed_track,
       rendered_line: previous.rendered_line,
       rendered_motion: previous.rendered_motion,
       rendered_at: previous.rendered_at,

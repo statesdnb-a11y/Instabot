@@ -411,6 +411,14 @@ function ReelCard({
               >
                 {working === "motion" ? "Recutting…" : "New motion"}
               </Button>
+              <Button
+                variant="outline"
+                className="h-11"
+                disabled={Boolean(working) || reel.stillMissing}
+                onClick={() => void run("music", { action: "change-music" })}
+              >
+                {working === "music" ? "Changing music…" : "Change music"}
+              </Button>
               {reel.renderStatus === "error" && !reel.stillMissing ? (
                 <Button
                   variant="outline"

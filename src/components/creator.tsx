@@ -4,17 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-const MUSIC = [
-  { id: "music-1", label: "Music 1" },
-  { id: "music-2", label: "Music 2" },
-  { id: "music-3", label: "Music 3" },
-  { id: "music-4", label: "Music 4" },
-  { id: "music-5", label: "Music 5" },
-  { id: "music-6", label: "Music 6" },
-  { id: "music-7", label: "Music 7" },
-  { id: "music-8", label: "Music 8" },
-] as const;
-
 type Still = {
   id: string;
   author: string;
@@ -26,7 +15,7 @@ type Still = {
 export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>; onBack: () => void }) {
   const [stills, setStills] = useState<Still[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [music, setMusic] = useState<(typeof MUSIC)[number]["id"]>("music-1");
+  const [nextTrack, setNextTrack] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [generated, setGenerated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +57,23 @@ export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>;
       stop = true;
     };
   }, [loadStills]);
+
+  useEffect(() => {
+    let stop = false;
+    const run = async () => {
+      try {
+        const response = await fetch("/api/music", { cache: "no-store" });
+        const data = (await response.json().catch(() => ({}))) as { label?: string };
+        if (!stop && response.ok && data.label) setNextTrack(data.label);
+      } catch {
+        if (!stop) setNextTrack(null);
+      }
+    };
+    void run();
+    return () => {
+      stop = true;
+    };
+  }, []);
 
   async function refresh() {
     setRefreshing(true);
@@ -120,7 +126,6 @@ export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>;
         body: JSON.stringify({
           mode: "create",
           photoId: selectedId,
-          bedTrack: music,
           caption: text,
           manual: text !== generated,
         }),
@@ -149,7 +154,7 @@ export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>;
         <div className="max-w-xl">
           <h2 className="font-serif text-2xl">Creator</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one, choose Music 1 through Music 8, and burn in a line.
+            A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one. The reel uses the next track in the rotation, then burn in a line.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -190,22 +195,9 @@ export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>;
         </div>
       )}
 
-      <div className="grid gap-2">
-        <p className="text-sm">Music</p>
-        <div className="flex flex-wrap gap-2">
-          {MUSIC.map((track) => (
-            <Button
-              key={track.id}
-              type="button"
-              variant={music === track.id ? "default" : "outline"}
-              className="h-11"
-              onClick={() => setMusic(track.id)}
-            >
-              {track.label}
-            </Button>
-          ))}
-        </div>
-      </div>
+      <p className="text-sm">
+        Music. {nextTrack ? `This reel will use ${nextTrack}.` : "The next unused track is chosen when you create the reel."}
+      </p>
 
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">

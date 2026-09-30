@@ -10,6 +10,7 @@ import {
   listReels,
   patchReel,
   purgePublished,
+  takeNextBedTrack,
   usageCounts,
   type ReelRow,
 } from "@/lib/db";
@@ -27,7 +28,7 @@ import { ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
 import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
 import { STILL_GONE, renderReelFile } from "@/lib/render";
-import { bedTrackById, pickBedTrack } from "@/lib/tracks";
+import { bedTrackById } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
 
@@ -76,7 +77,7 @@ export async function createDraft() {
     audio_artwork_url: null,
     audio_preview_url: null,
     audio_duration_ms: null,
-    bed_track: pickBedTrack().id,
+    bed_track: (await takeNextBedTrack()).id,
     motion: await pickMotion(),
     duration_sec: 8 + Math.floor(Math.random() * 5),
     video_path: null,
@@ -100,17 +101,16 @@ export async function createDraft() {
 
 export async function createStudioReel(input: {
   photoId: string;
-  bedTrack: string;
   caption: string;
   manual: boolean;
 }) {
   const photo = findPhoto(input.photoId);
   if (!photo) throw new CaptionError("Pick one of the stills.");
-  const track = bedTrackById(input.bedTrack);
-  if (!track) throw new CaptionError("Pick Music 1 through Music 8.");
   const caption = input.caption.trim();
   if (!caption) throw new CaptionError("Write a caption, or generate one.");
   if (caption.length > 220) throw new CaptionError("That caption is too long.");
+  const track = bedTrackById((await takeNextBedTrack()).id);
+  if (!track) throw new CaptionError("Pick Music 1 through Music 8.");
   const now = Date.now();
   const row: ReelRow = {
     id: crypto.randomUUID(),

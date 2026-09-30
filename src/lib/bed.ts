@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { claimBedTrack, listReels, patchReel } from "@/lib/db";
+import { claimBedTrack, listReels, patchReel, takeNextBedTrack, undoBedTrackTake } from "@/lib/db";
 import {
   blobEnabled,
   onVercel,
@@ -12,15 +12,18 @@ import {
 } from "@/lib/media";
 import { RENDER_DIR } from "@/lib/paths";
 import { muxBedAudio } from "@/lib/render";
-import { pickBedTrack } from "@/lib/tracks";
 
 export async function attachMissingBedAudio() {
   const reels = await listReels();
   for (const reel of reels) {
     if (reel.bed_track || reel.render_status !== "ready" || !reel.video_path || !videoExists(reel)) continue;
-    const track = pickBedTrack();
+    const taken = await takeNextBedTrack(reel.bed_track);
+    const track = { id: taken.id };
     const claimed = await claimBedTrack(reel.id, track.id);
-    if (!claimed) continue;
+    if (!claimed) {
+      await undoBedTrackTake(taken);
+      continue;
+    }
     const name = `${reel.id}-bed-${track.id}-${Date.now()}.mp4`;
     const dir = blobEnabled() || onVercel() ? path.join("/tmp", "instabot") : RENDER_DIR;
     fs.mkdirSync(dir, { recursive: true });
@@ -39,6 +42,7 @@ export async function attachMissingBedAudio() {
       if (reel.video_path !== stored) await removeStoredVideo(reel.video_path);
     } catch (error) {
       fs.rmSync(dest, { force: true });
+      await undoBedTrackTake(taken);
       await patchReel(reel.id, {
         bed_track: null,
         render_error: safeMediaError(error),

@@ -3,6 +3,7 @@ import { CaptionError } from "@/lib/captions";
 import {
   DeskError,
   approveReel,
+  changeMusic,
   regenerateLine,
   regenerateMotion,
   retryPublish,
@@ -51,6 +52,8 @@ export async function POST(
         return json(await regenerateLine(id));
       case "regenerate-motion":
         return json(await regenerateMotion(id));
+      case "change-music":
+        return json(await changeMusic(id));
       case "retry-render":
         return json(await retryRender(id));
       case "approve":

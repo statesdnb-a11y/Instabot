@@ -38,7 +38,6 @@ export async function POST(request: Request) {
     if (body.mode === "create") {
       const id = await createStudioReel({
         photoId: typeof body.photoId === "string" ? body.photoId : "",
-        bedTrack: typeof body.bedTrack === "string" ? body.bedTrack : "",
         caption: typeof body.caption === "string" ? body.caption : "",
         manual: body.manual === true,
       });

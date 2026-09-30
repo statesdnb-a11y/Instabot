@@ -3,6 +3,7 @@ import path from "node:path";
 import { removeStoredVideo } from "@/lib/media";
 import { RENDER_DIR } from "@/lib/paths";
 import { openSql, tursoEnabled, type Sql } from "@/lib/sql";
+import { BED_TRACKS } from "@/lib/tracks";
 import type { Motion, PostState, ReelStatus, RenderStatus } from "@/lib/types";
 
 export type ReelRow = {
@@ -136,6 +137,10 @@ async function openDatabase() {
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS used_bed_tracks (
+      track_id TEXT PRIMARY KEY,
+      used_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS shown_stills (
       photo_id TEXT PRIMARY KEY,
@@ -470,6 +475,58 @@ export async function rememberShownStill(photoId: string, username: string) {
     name,
     Date.now(),
   );
+}
+
+export type BedTrackTake = { id: string; cleared: string[] };
+
+async function usedBedIds(db: Sql) {
+  const rows = await db.all<{ track_id: string }>("SELECT track_id FROM used_bed_tracks");
+  return rows.map((row) => row.track_id);
+}
+
+function nextUnusedBed(used: Set<string>, avoid: string | null) {
+  const start = avoid ? BED_TRACKS.findIndex((track) => track.id === avoid) : -1;
+  for (let step = 1; step <= BED_TRACKS.length; step += 1) {
+    const track = BED_TRACKS[(start + step) % BED_TRACKS.length];
+    if (!track || used.has(track.id) || track.id === avoid) continue;
+    return track;
+  }
+  return null;
+}
+
+export async function peekNextBedTrack() {
+  const db = await getSql();
+  const used = new Set(await usedBedIds(db));
+  const next = nextUnusedBed(used, null) ?? BED_TRACKS[0];
+  return { id: next.id, label: next.label };
+}
+
+export async function takeNextBedTrack(avoid?: string | null): Promise<BedTrackTake> {
+  const db = await getSql();
+  const existing = await usedBedIds(db);
+  const used = new Set(existing);
+  let cleared: string[] = [];
+  let next = nextUnusedBed(used, avoid ?? null);
+  if (!next) {
+    cleared = existing;
+    await db.run("DELETE FROM used_bed_tracks");
+    next = nextUnusedBed(new Set(), avoid ?? null) ?? BED_TRACKS[0];
+  }
+  await db.run(
+    `INSERT INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)
+     ON CONFLICT(track_id) DO UPDATE SET used_at = excluded.used_at`,
+    next.id,
+    Date.now(),
+  );
+  return { id: next.id, cleared };
+}
+
+export async function undoBedTrackTake(take: BedTrackTake) {
+  const db = await getSql();
+  await db.run("DELETE FROM used_bed_tracks WHERE track_id = ?", take.id);
+  for (const id of take.cleared) {
+    await db.run("INSERT OR IGNORE INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)", id, Date.now());
+  }
 }
 
 export async function claimBedTrack(id: string, trackId: string) {
