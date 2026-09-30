@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { CatalogTrack, DeskPayload, ReelDTO } from "@/lib/types";
+import type { CatalogTrack, DeskPayload, InstagramDesk, ReelDTO } from "@/lib/types";
 
 type Tab = "drafts" | "approved";
 
@@ -48,7 +48,13 @@ function downloadHref(videoUrl: string) {
   return videoUrl.includes("?") ? `${videoUrl}&download=1` : `${videoUrl}?download=1`;
 }
 
-export function Portal({ initial }: { initial: DeskPayload }) {
+export function Portal({
+  initial,
+  instagramNotice = null,
+}: {
+  initial: DeskPayload;
+  instagramNotice?: string | null;
+}) {
   const [payload, setPayload] = useState<DeskPayload | null>(initial);
   const [loaded, setLoaded] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,9 +137,11 @@ export function Portal({ initial }: { initial: DeskPayload }) {
           </p>
         </div>
         <div className="flex flex-col items-start gap-3 sm:items-end">
-          <Badge variant="outline">
-            {payload?.instagramConnected ? "Instagram connected" : "Instagram not connected"}
-          </Badge>
+          <InstagramConnect
+            desk={payload?.instagram ?? null}
+            notice={instagramNotice}
+            onChange={() => void load()}
+          />
           <div className="flex flex-wrap gap-2">
             <CaptionEditor />
             <Button className="h-11 px-4" onClick={() => void generate()} disabled={generating}>
@@ -225,6 +233,64 @@ export function Portal({ initial }: { initial: DeskPayload }) {
           </TabsContent>
         </Tabs>
       )}
+    </div>
+  );
+}
+
+function InstagramConnect({
+  desk,
+  notice,
+  onChange,
+}: {
+  desk: InstagramDesk | null;
+  notice: string | null;
+  onChange: () => void;
+}) {
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  async function disconnect() {
+    setDisconnecting(true);
+    setLocalError(null);
+    try {
+      const response = await fetch("/api/instagram/connection", { method: "DELETE" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Could not disconnect Instagram.");
+      onChange();
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Could not disconnect Instagram.");
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  return (
+    <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+      {desk?.connected ? (
+        <>
+          <Badge variant="outline">
+            {desk.username ? `Instagram connected · @${desk.username}` : "Instagram connected"}
+          </Badge>
+          {desk.stored ? (
+            <Button variant="ghost" className="h-9" disabled={disconnecting} onClick={() => void disconnect()}>
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          ) : null}
+        </>
+      ) : desk?.setupHint ? (
+        <div className="rounded-xl border border-border bg-card px-3 py-3 text-left">
+          <Button className="h-11" disabled>
+            Connect Instagram
+          </Button>
+          <p className="mt-2 text-sm leading-5 text-muted-foreground">{desk.setupHint}</p>
+        </div>
+      ) : (
+        <Button className="h-11" asChild>
+          <a href="/api/instagram/connect">Connect Instagram</a>
+        </Button>
+      )}
+      {notice ? <p className="text-left text-sm leading-5 text-destructive">{notice}</p> : null}
+      {localError ? <p className="text-left text-sm leading-5 text-destructive">{localError}</p> : null}
     </div>
   );
 }

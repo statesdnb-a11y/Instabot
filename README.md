@@ -29,7 +29,7 @@ There is no in-process timer and no Vercel cron. Approve publishes immediately.
 
 - 1080×1920, H.264, no audio track, about 8–12 seconds, 30 fps
 - Center-weighted 9:16 crop, then a slow zoom (1.0 → 1.08) or a slow pan that stays near the middle
-- One sentence burned in over a soft scrim
+- One sentence burned into the top third: larger white type, a dark scrim behind the words, and a dark stroke
 - The same sentence stored as the Instagram caption, unless you split them
 - Music is not mixed into the file. On publish, Instagram attaches a catalog track
 
@@ -52,9 +52,12 @@ Lines are filled from caption templates on the desk. Tokens are `{noun}`, `{verb
 
 | Variable | Required | What it does |
 | --- | --- | --- |
-| `INSTABOT_PASSWORD` | No | Locks the portal. Unset means open. |
-| `IG_ACCESS_TOKEN` | No | Facebook Login token for the Instagram API. |
-| `IG_USER_ID` | No | Instagram professional account id. |
+| `INSTABOT_PASSWORD` | No | Locks the portal. Unset means open. Connect Instagram stays behind this login. |
+| `META_APP_ID` | To connect | Meta app id for the Connect Instagram button. |
+| `META_APP_SECRET` | To connect | Meta app secret. Not stored in the database. |
+| `META_REDIRECT_URI` | To connect | Redirect URL registered on the Meta app. Example: `https://your-desk.example/api/instagram/callback`. |
+| `IG_ACCESS_TOKEN` | No | Optional fallback token when the desk has no stored login. |
+| `IG_USER_ID` | No | Optional fallback Instagram professional account id. |
 | `TURSO_DATABASE_URL` | For Vercel | libsql URL for the queue, banks, and used captions. |
 | `TURSO_AUTH_TOKEN` | For Vercel | Turso token. Both Turso variables are required together. |
 | `instabot_STORE_ID` or `BLOB_STORE_ID` | For Vercel | Public Blob store id. On Vercel the app uploads with OIDC. The preview plays the public Blob URL. |
@@ -74,7 +77,7 @@ Search is `GET https://graph.facebook.com/v22.0/ig_audio?audio_type=music&user_i
 
 A browser `<audio>` element may play the temporary preview URL. That URL is not saved as a file and is not muxed into the reel. Meta does not support previewing the published reel with the attached audio.
 
-Without `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works, the reel stays silent, and the UI says music attaches once the professional account is connected.
+Without a stored login or both `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works, the reel stays silent, and the UI says music attaches once the professional account is connected.
 
 ## Posting to Instagram
 
@@ -87,13 +90,13 @@ When Meta returns a published media id, the reel is deleted. A failed publish st
 ### Professional account setup
 
 1. Switch the Instagram account to Professional (Business or Creator) and connect it to a Facebook Page you manage.
-2. Create a Business app at [developers.facebook.com](https://developers.facebook.com/).
-3. Use Instagram API with Facebook Login. Grant `instagram_basic` and `instagram_content_publish`, and link the Facebook Page.
-4. Create a long-lived user token that includes those permissions.
-5. Find the Instagram user id: `GET /me/accounts`, then `GET /{page-id}?fields=instagram_business_account`.
-6. Put the token in `IG_ACCESS_TOKEN` and that id in `IG_USER_ID`.
+2. Create a Business app at [developers.facebook.com](https://developers.facebook.com/) and add Facebook Login.
+3. Set `META_APP_ID`, `META_APP_SECRET`, and `META_REDIRECT_URI` on the host. The redirect URL is the desk origin plus `/api/instagram/callback`, and it must match the Meta app exactly.
+4. If any of those three are unset, the header still shows Connect Instagram and names the missing ones. It does not start login.
+5. Open the desk (the portal passphrase, when set, stays in front of this) and click Connect Instagram. Facebook Login asks for `instagram_basic`, `instagram_content_publish`, `pages_show_list`, and `pages_read_engagement`.
+6. The callback exchanges the code, finds the Page linked to the professional account, and stores that access token and Instagram user id in Turso or local SQLite. They are not written to a file or to git.
 7. The app needs to be in Live mode, or the Instagram account needs a role on the app, or publish calls are rejected.
-8. Put the token in `IG_ACCESS_TOKEN` and that id in `IG_USER_ID` on the host, then redeploy or restart.
+8. `IG_ACCESS_TOKEN` and `IG_USER_ID` still work as a fallback when nothing is stored. A stored login is what publish and catalog search use first.
 9. Trending and search fill the track picker. Approving posts the silent file and asks Instagram to attach the chosen track.
 
 The video bytes are uploaded from the stored mp4, whether that file is on disk or in Vercel Blob. A public video URL is not required for the Graph upload. Docs: [Audio API](https://developers.facebook.com/documentation/instagram-platform/content-publishing/audio-api).

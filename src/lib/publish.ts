@@ -20,7 +20,7 @@ async function publishDue(reel: ReelRow) {
     });
     return;
   }
-  if (!instagramConnected()) {
+  if (!(await instagramConnected())) {
     await patchReel(reel.id, {
       post_state: "not_connected",
       post_error: null,

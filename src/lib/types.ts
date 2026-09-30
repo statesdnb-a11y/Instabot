@@ -47,8 +47,16 @@ export type ReelDTO = {
   postedAt: number | null;
 };
 
+export type InstagramDesk = {
+  connected: boolean;
+  username: string | null;
+  stored: boolean;
+  setupHint: string | null;
+};
+
 export type DeskPayload = {
   reels: ReelDTO[];
   instagramConnected: boolean;
+  instagram: InstagramDesk;
   draftTarget: number;
 };

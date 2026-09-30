@@ -1,3 +1,5 @@
+import { getInstagramConnection } from "@/lib/db";
+
 const GRAPH = "https://graph.facebook.com/v22.0";
 
 export type PublishResult =
@@ -5,8 +7,19 @@ export type PublishResult =
   | { state: "posted"; igMediaId: string }
   | { state: "failed"; error: string };
 
-export function instagramConnected() {
-  return Boolean(process.env.IG_ACCESS_TOKEN && process.env.IG_USER_ID);
+export async function instagramCredentials() {
+  const stored = await getInstagramConnection();
+  if (stored?.access_token && stored.ig_user_id) {
+    return { token: stored.access_token, userId: stored.ig_user_id };
+  }
+  const token = process.env.IG_ACCESS_TOKEN;
+  const userId = process.env.IG_USER_ID;
+  if (token && userId) return { token, userId };
+  return null;
+}
+
+export async function instagramConnected() {
+  return (await instagramCredentials()) !== null;
 }
 
 function graphError(body: unknown, fallback: string) {
@@ -33,16 +46,16 @@ function sleep(ms: number) {
 
 /**
  * Official Instagram Graph API Reels publish via resumable upload.
- * No-ops with not_connected when IG_ACCESS_TOKEN or IG_USER_ID is missing.
+ * No-ops with not_connected when no stored login or env credentials exist.
  */
 export async function publishReel(
   video: Buffer,
   caption: string,
   audioId: string | null,
 ): Promise<PublishResult> {
-  const token = process.env.IG_ACCESS_TOKEN;
-  const userId = process.env.IG_USER_ID;
-  if (!token || !userId) return { state: "not_connected" };
+  const creds = await instagramCredentials();
+  if (!creds) return { state: "not_connected" };
+  const { token, userId } = creds;
   if (!audioId) {
     return { state: "failed", error: "A catalog track is required before the container is created." };
   }

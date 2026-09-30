@@ -78,10 +78,31 @@ export function wrapLine(text: string, width = 28) {
 }
 
 function fontSize(lineCount: number) {
-  if (lineCount >= 6) return 38;
-  if (lineCount >= 5) return 42;
-  if (lineCount >= 4) return 46;
-  return 52;
+  if (lineCount >= 8) return 48;
+  if (lineCount >= 6) return 58;
+  if (lineCount >= 5) return 66;
+  if (lineCount >= 4) return 76;
+  if (lineCount >= 3) return 86;
+  return 96;
+}
+
+function captionBlock(lineCount: number, size: number) {
+  return 88 + lineCount * Math.round(size * 1.2) + 48;
+}
+
+function layoutCaption(text: string) {
+  const widths = [20, 22, 24, 26, 28];
+  let chosen = { lines: wrapLine(text, widths[0]), size: fontSize(1) };
+  for (const width of widths) {
+    const lines = wrapLine(text, width);
+    const size = fontSize(lines.length);
+    chosen = { lines, size };
+    if (captionBlock(lines.length, size) <= 630) return chosen;
+  }
+  while (chosen.size > 42 && captionBlock(chosen.lines.length, chosen.size) > 630) {
+    chosen = { lines: chosen.lines, size: chosen.size - 4 };
+  }
+  return chosen;
 }
 
 function runFfmpeg(args: string[]) {
@@ -121,18 +142,12 @@ export async function renderReelFile(input: {
 
   const duration = Math.min(12, Math.max(8, Math.round(input.durationSec)));
   const frames = duration * FPS;
-  const lines = wrapLine(input.line);
-  const size = fontSize(lines.length);
   const assPath = path.join(path.dirname(input.outputPath), `line-${path.basename(input.outputPath, ".mp4")}.ass`);
   fs.mkdirSync(path.dirname(assPath), { recursive: true });
-  fs.writeFileSync(assPath, assScript(lines, size, duration), "utf8");
+  fs.writeFileSync(assPath, captionAss(input.line, duration), "utf8");
   const subs = escapeFilterPath(assPath);
   const fonts = escapeFilterPath(path.dirname(fontFile()));
-  const type =
-    `drawbox=x=0:y=ih*0.58:w=iw:h=ih*0.14:color=black@0.22:t=fill,` +
-    `drawbox=x=0:y=ih*0.70:w=iw:h=ih*0.30:color=black@0.48:t=fill,` +
-    `subtitles='${subs}':fontsdir='${fonts}',` +
-    `format=yuv420p[v]`;
+  const type = `subtitles='${subs}':fontsdir='${fonts}',format=yuv420p[v]`;
 
   let video: string;
   if (input.motion === "pan") {
@@ -220,6 +235,11 @@ function assEscape(text: string) {
   return text.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}");
 }
 
+export function captionAss(line: string, duration: number) {
+  const { lines, size } = layoutCaption(line);
+  return assScript(lines, size, duration);
+}
+
 function assScript(lines: string[], size: number, duration: number) {
   const minutes = Math.floor(duration / 60);
   const seconds = duration % 60;
@@ -233,7 +253,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Line,Noto Serif,${size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,0,3,2,90,90,210,1
+Style: Line,Noto Serif,${size},&H00FFFFFF,&H000000FF,&H00000000,&H66000000,0,1,0,0,100,100,0,0,4,4,18,8,72,72,88,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

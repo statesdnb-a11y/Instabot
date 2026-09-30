@@ -122,6 +122,13 @@ async function openDatabase() {
     CREATE TABLE IF NOT EXISTS used_captions (
       caption_key TEXT PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS instagram_connection (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      access_token TEXT NOT NULL,
+      ig_user_id TEXT NOT NULL,
+      username TEXT,
+      connected_at INTEGER NOT NULL
+    );
   `);
   return db;
 }
@@ -337,6 +344,46 @@ export async function insertReel(row: ReelRow) {
     )`,
     row,
   );
+}
+
+export type InstagramConnection = {
+  access_token: string;
+  ig_user_id: string;
+  username: string | null;
+  connected_at: number;
+};
+
+export async function getInstagramConnection() {
+  const db = await getSql();
+  return db.get<InstagramConnection>(
+    "SELECT access_token, ig_user_id, username, connected_at FROM instagram_connection WHERE id = 1",
+  );
+}
+
+export async function saveInstagramConnection(input: {
+  accessToken: string;
+  igUserId: string;
+  username: string | null;
+}) {
+  const db = await getSql();
+  await db.run(
+    `INSERT INTO instagram_connection (id, access_token, ig_user_id, username, connected_at)
+     VALUES (1, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       access_token = excluded.access_token,
+       ig_user_id = excluded.ig_user_id,
+       username = excluded.username,
+       connected_at = excluded.connected_at`,
+    input.accessToken,
+    input.igUserId,
+    input.username,
+    Date.now(),
+  );
+}
+
+export async function clearInstagramConnection() {
+  const db = await getSql();
+  await db.run("DELETE FROM instagram_connection WHERE id = 1");
 }
 
 export async function patchReel(id: string, fields: Partial<ReelRow>) {

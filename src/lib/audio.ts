@@ -1,3 +1,4 @@
+import { instagramCredentials } from "@/lib/instagram";
 import type { CatalogTrack } from "@/lib/types";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
@@ -44,19 +45,20 @@ function asTrack(raw: unknown): CatalogTrack | null {
  * Returns catalog metadata. The temporary preview URL is never downloaded or stored as a file.
  */
 export async function searchMusic(query?: string): Promise<AudioSearch> {
-  const token = process.env.IG_ACCESS_TOKEN;
-  const userId = process.env.IG_USER_ID;
-  if (!token || !userId) return { connected: false, tracks: [] };
+  const creds = await instagramCredentials();
+  if (!creds) return { connected: false, tracks: [] };
 
   const url = new URL(`${GRAPH}/ig_audio`);
   url.searchParams.set("audio_type", "music");
-  url.searchParams.set("user_id", userId);
-  url.searchParams.set("access_token", token);
+  url.searchParams.set("user_id", creds.userId);
   const trimmed = query?.trim();
   if (trimmed) url.searchParams.set("search_query", trimmed);
 
   try {
-    const response = await fetch(url, { cache: "no-store" });
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${creds.token}` },
+    });
     const body = (await response.json().catch(() => ({}))) as { audio?: unknown };
     if (!response.ok) {
       return { connected: true, tracks: [], error: graphMessage(body) };
@@ -65,11 +67,11 @@ export async function searchMusic(query?: string): Promise<AudioSearch> {
       ? body.audio.map(asTrack).filter((track): track is CatalogTrack => track !== null)
       : [];
     return { connected: true, tracks };
-  } catch (error) {
+  } catch {
     return {
       connected: true,
       tracks: [],
-      error: error instanceof Error ? error.message : "Instagram's music catalog could not be loaded.",
+      error: "Instagram's music catalog could not be loaded.",
     };
   }
 }

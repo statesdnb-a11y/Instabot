@@ -3,6 +3,7 @@ import path from "node:path";
 import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
 import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
+import { instagramDesk } from "@/lib/meta";
 import { onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
 import { PHOTO_DIR, RENDER_DIR } from "@/lib/paths";
 import { publishApprovedNow } from "@/lib/publish";
@@ -93,7 +94,8 @@ export async function deskPayload(): Promise<DeskPayload> {
   const reels = await listReels();
   return {
     reels: await Promise.all(reels.map((row) => toReelDTO(row))),
-    instagramConnected: instagramConnected(),
+    instagramConnected: await instagramConnected(),
+    instagram: await instagramDesk(),
     draftTarget: DRAFT_TARGET,
   };
 }
