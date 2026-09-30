@@ -11,7 +11,9 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const media = await reelMedia(id, "poster");
-  if (!media?.file) return new Response("Still not found.", { status: 404 });
+  if (!media) return new Response("Still not found.", { status: 404 });
+  if (media.url) return Response.redirect(media.url, 302);
+  if (!media.file) return new Response("Still not found.", { status: 404 });
   const size = statSync(media.file).size;
   return new Response(Readable.toWeb(createReadStream(media.file)) as ReadableStream, {
     headers: {

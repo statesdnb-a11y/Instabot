@@ -153,15 +153,22 @@ async function openDatabase() {
 async function forgetApprovedHistory(db: Sql) {
   const done = await db.get<{ value: string }>("SELECT value FROM app_meta WHERE key = ?", "forget_used_lines_v1");
   if (done) return;
-  await db.run("DELETE FROM used_captions");
+  const before = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM used_captions");
   const approved = await db.all<{ id: string; video_path: string | null }>(
     "SELECT id, video_path FROM reels WHERE status = 'approved'",
   );
+  await db.run("DELETE FROM used_captions");
   for (const row of approved) {
     await removeStoredVideo(row.video_path).catch(() => undefined);
     await db.run("DELETE FROM reels WHERE id = ?", row.id);
   }
-  await db.run("INSERT INTO app_meta (key, value) VALUES (?, ?)", "forget_used_lines_v1", "1");
+  const after = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM used_captions");
+  const note = JSON.stringify({
+    usedBefore: before?.n ?? 0,
+    usedAfter: after?.n ?? 0,
+    approvedRemoved: approved.length,
+  });
+  await db.run("INSERT INTO app_meta (key, value) VALUES (?, ?)", "forget_used_lines_v1", note);
 }
 
 const SEED_TEMPLATES = [

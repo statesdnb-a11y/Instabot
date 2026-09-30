@@ -7,6 +7,7 @@ import {
   getReel,
   getSql,
   insertReel,
+  listReels,
   patchReel,
   purgePublished,
   usageCounts,
@@ -22,7 +23,7 @@ import {
   saveRenderedMp4,
   saveStillJpeg,
 } from "@/lib/media";
-import { PHOTO_DIR, ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
+import { ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
 import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
 import { STILL_GONE, renderReelFile } from "@/lib/render";
@@ -246,35 +247,124 @@ function publicStillUrl(value: string | undefined) {
   return value && isPublicBlobUrl(value) ? value : null;
 }
 
-function bundledStill(file: string) {
-  const root = path.resolve(PHOTO_DIR);
-  const resolved = path.resolve(file);
-  return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+function localStillFile(file: string | null) {
+  if (!file || isPublicBlobUrl(file)) return null;
+  if (path.isAbsolute(file) && fs.existsSync(file)) return file;
+  return resolvePhotoFile(file);
+}
+
+function siblingStillUrls(reel: ReelRow) {
+  if (!reel.video_path || !isPublicBlobUrl(reel.video_path)) return [];
+  let origin: string;
+  try {
+    origin = new URL(reel.video_path).origin;
+  } catch {
+    return [];
+  }
+  const ids = new Set<string>();
+  if (/^\d+$/.test(reel.photo_id)) ids.add(reel.photo_id);
+  const fromFile = /^studio-(\d+)\.jpg$/.exec(path.basename(reel.photo_file))?.[1];
+  if (fromFile) ids.add(fromFile);
+  return [...ids].map((id) => `${origin}/stills/${id}.jpg`);
+}
+
+async function publicJpegReady(url: string) {
+  if (!isPublicBlobUrl(url)) return false;
+  try {
+    const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return false;
+    const type = response.headers.get("content-type") ?? "";
+    const length = Number(response.headers.get("content-length") ?? "0");
+    return type.includes("jpeg") || type.includes("jpg") || length >= 8000;
+  } catch {
+    return false;
+  }
+}
+
+async function clearStaleStillError(reel: ReelRow) {
+  if (reel.render_error !== STILL_GONE) return;
+  const linesMatch = reel.rendered_line === reel.line && reel.rendered_motion === reel.motion;
+  await patchReel(reel.id, {
+    render_error: null,
+    render_status: reel.video_path && linesMatch ? "ready" : reel.render_status,
+    updated_at: Date.now(),
+  });
+}
+
+/** Remember a public blob URL, or a local file reference when Blob is unset. */
+export async function ensureReelStill(reel: ReelRow) {
+  const urls = [reel.still_url, findPhoto(reel.photo_id)?.imageUrl, ...siblingStillUrls(reel)].filter(
+    (url): url is string => Boolean(url),
+  );
+  const seen = new Set<string>();
+  for (const url of urls) {
+    if (!isPublicBlobUrl(url) || seen.has(url)) continue;
+    seen.add(url);
+    if (!(await publicJpegReady(url))) continue;
+    if (reel.still_url !== url) {
+      await patchReel(reel.id, { still_url: url, updated_at: Date.now() });
+    }
+    const next = await getReel(reel.id);
+    if (next) await clearStaleStillError(next);
+    return;
+  }
+
+  const local = localStillFile(reel.photo_file) ?? localStillFile(reel.still_url);
+  if (!local) throw new Error(STILL_GONE);
+  if (blobEnabled()) {
+    const imageUrl = await saveStillJpeg(reel.photo_id, fs.readFileSync(local)).catch(() => null);
+    if (!imageUrl) {
+      if (onVercel()) throw new Error("The still could not be stored for a later edit.");
+    } else if (reel.still_url !== imageUrl) {
+      await patchReel(reel.id, { still_url: imageUrl, updated_at: Date.now() });
+      const next = await getReel(reel.id);
+      if (next) await clearStaleStillError(next);
+      return;
+    } else {
+      return;
+    }
+  }
+  const reference = path.basename(local);
+  if (reel.still_url !== reference) {
+    await patchReel(reel.id, { still_url: reference, updated_at: Date.now() });
+  }
+}
+
+export async function stillIsMissing(reel: ReelRow) {
+  try {
+    await ensureReelStill(reel);
+    return false;
+  } catch (error) {
+    return !(error instanceof Error) || error.message === STILL_GONE;
+  }
 }
 
 async function materializeReelStill(reel: ReelRow) {
-  if (reel.still_url && isPublicBlobUrl(reel.still_url)) {
-    const response = await fetch(reel.still_url, { signal: AbortSignal.timeout(20000) });
+  await ensureReelStill(reel);
+  const fresh = (await getReel(reel.id)) ?? reel;
+  if (fresh.still_url && isPublicBlobUrl(fresh.still_url)) {
+    const response = await fetch(fresh.still_url, { signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw new Error(STILL_GONE);
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length < 8000 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error(STILL_GONE);
-    const dest = path.join(path.dirname(renderOutputPath(reel.id, reel.render_nonce)), `still-${reel.id}.jpg`);
+    const dest = path.join(path.dirname(renderOutputPath(fresh.id, fresh.render_nonce)), `still-${fresh.id}.jpg`);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, bytes);
     return { path: dest, temporary: true };
   }
-
-  const local = resolvePhotoFile(reel.photo_file);
+  const local = localStillFile(fresh.still_url) ?? localStillFile(fresh.photo_file);
   if (!local) throw new Error(STILL_GONE);
-  if (blobEnabled()) {
-    const imageUrl = await saveStillJpeg(reel.photo_id, fs.readFileSync(local)).catch(() => null);
-    if (imageUrl) {
-      await patchReel(reel.id, { still_url: imageUrl, updated_at: Date.now() });
-    } else if (onVercel() && !bundledStill(local)) {
-      throw new Error("The still could not be stored for a later edit.");
+  return { path: local, temporary: false };
+}
+
+async function rememberDeskStills() {
+  for (const reel of await listReels()) {
+    try {
+      await ensureReelStill(reel);
+    } catch {
+      // A reel with no readable JPEG stays missing on its card.
     }
   }
-  return { path: local, temporary: false };
 }
 
 export async function markForRender(id: string) {
@@ -310,6 +400,7 @@ async function runBoot() {
   const db = await getSql();
   await db.run("UPDATE reels SET render_status = 'pending' WHERE status = 'draft' AND render_status = 'rendering'");
   await attachMissingBedAudio();
+  await rememberDeskStills();
   if (onVercel()) return;
   await createDrafts(0);
   const pending = await db.all<{ id: string }>(

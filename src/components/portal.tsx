@@ -378,7 +378,7 @@ function ReelCard({
         )}
 
         {reel.stillMissing ? (
-          <p className="text-sm text-destructive">This reel&apos;s still is already gone.</p>
+          <p className="text-sm text-destructive">The still for this reel is missing.</p>
         ) : reel.renderError ? (
           <p className="text-sm text-destructive">{reel.renderError}</p>
         ) : null}
@@ -394,7 +394,7 @@ function ReelCard({
         <div className="mt-auto flex flex-wrap gap-2">
           {reel.status === "draft" ? (
             <>
-              <EditLine reel={reel} disabled={Boolean(working)} onSaved={onChange} />
+              <EditLine reel={reel} disabled={Boolean(working) || reel.stillMissing} onSaved={onChange} />
               <Button
                 variant="outline"
                 className="h-11"
@@ -685,7 +685,7 @@ function EditLine({
             </div>
           ) : null}
           {reel.stillMissing ? (
-            <p className="text-sm text-destructive">This reel&apos;s still is already gone.</p>
+            <p className="text-sm text-destructive">The still for this reel is missing.</p>
           ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
@@ -693,7 +693,7 @@ function EditLine({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={() => void save()} disabled={busy || (!lineChanged && !captionChanged) || (reel.stillMissing && lineChanged)}>
+          <Button onClick={() => void save()} disabled={busy || reel.stillMissing || (!lineChanged && !captionChanged)}>
             {busy ? "Saving…" : lineChanged ? "Save and re-render" : "Save caption"}
           </Button>
         </DialogFooter>

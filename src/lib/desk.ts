@@ -5,9 +5,9 @@ import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
 import { isPublicBlobUrl, onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
-import { PHOTO_DIR, RENDER_DIR, resolvePhotoFile } from "@/lib/paths";
+import { RENDER_DIR, resolvePhotoFile } from "@/lib/paths";
 import { publishApprovedNow } from "@/lib/publish";
-import { DRAFT_TARGET, fillQueue, markForRender } from "@/lib/queue";
+import { DRAFT_TARGET, ensureReelStill, fillQueue, markForRender, stillIsMissing } from "@/lib/queue";
 import { STILL_GONE } from "@/lib/render";
 import type { CatalogTrack, DeskPayload, Motion, ReelDTO } from "@/lib/types";
 import { bedTrackById } from "@/lib/tracks";
@@ -86,7 +86,7 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
     postState: row.post_state,
     postError: row.post_error,
     igMediaId: row.ig_media_id,
-    stillMissing: reelStillMissing(row),
+    stillMissing: await stillIsMissing(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvedAt: row.approved_at,
@@ -138,7 +138,9 @@ export async function updateDraft(
     ? cleanText(input.caption ?? reel.caption, MAX_CAPTION, "The caption")
     : line;
   const lineChanged = line !== reel.line;
-  if (lineChanged && reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
+  const captionChanged = caption !== reel.caption || (captionCustom ? 1 : 0) !== reel.caption_custom;
+  if (!lineChanged && !captionChanged) return toReelDTO(reel);
+  await requireStill(id);
   await patchReel(id, {
     line,
     caption,
@@ -182,7 +184,7 @@ export async function setAudio(id: string, audio: unknown) {
 
 export async function regenerateLine(id: string) {
   const reel = await requireDraft(id);
-  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
+  await requireStill(id);
   const line = await nextLine([reel.line]);
   await patchReel(id, {
     line,
@@ -197,7 +199,7 @@ export async function regenerateLine(id: string) {
 
 export async function regenerateMotion(id: string) {
   const reel = await requireDraft(id);
-  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
+  await requireStill(id);
   const motion: Motion = reel.motion === "zoom" ? "pan" : "zoom";
   await patchReel(id, { motion, updated_at: Date.now() });
   await rerenderOrRestore(id, reel);
@@ -208,7 +210,7 @@ export async function regenerateMotion(id: string) {
 
 export async function retryRender(id: string) {
   const reel = await requireDraft(id);
-  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
+  await requireStill(id);
   if (reel.render_status === "rendering" || reel.render_status === "pending") {
     return toReelDTO(reel);
   }
@@ -274,9 +276,15 @@ export async function retryPublish(id: string) {
   return finishPublish(id);
 }
 
-function reelStillMissing(row: ReelRow) {
-  if (row.still_url && isPublicBlobUrl(row.still_url)) return false;
-  return !resolvePhotoFile(row.photo_file);
+async function requireStill(id: string) {
+  const reel = await getReel(id);
+  if (!reel) throw new DeskError(STILL_GONE, 409);
+  try {
+    await ensureReelStill(reel);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : STILL_GONE;
+    throw new DeskError(message, 409);
+  }
 }
 
 async function rerenderOrRestore(id: string, previous: ReelRow) {
@@ -313,8 +321,11 @@ export async function reelMedia(id: string, kind: "video" | "poster") {
   const reel = await getReel(id);
   if (!reel) return null;
   if (kind === "poster") {
-    const file = path.join(PHOTO_DIR, reel.photo_file);
-    if (!insideDir(file, PHOTO_DIR) || !fs.existsSync(file)) return null;
+    if (reel.still_url && isPublicBlobUrl(reel.still_url)) {
+      return { file: null, url: reel.still_url, type: "image/jpeg" as const, downloadName: null };
+    }
+    const file = resolvePhotoFile(reel.photo_file) ?? resolvePhotoFile(reel.still_url ?? "");
+    if (!file) return null;
     return { file, url: null as string | null, type: "image/jpeg" as const, downloadName: null };
   }
   const stored = storedVideoKind(reel.video_path);
