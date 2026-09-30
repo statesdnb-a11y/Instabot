@@ -173,8 +173,11 @@ export async function muxBedAudio(videoPath: string, bedTrack: string, outputPat
   }
 }
 
+export const STILL_GONE = "This reel's still is already gone.";
+
 export async function renderReelFile(input: {
   photoFile: string;
+  photoPath?: string;
   line: string;
   motion: Motion;
   durationSec: number;
@@ -182,9 +185,10 @@ export async function renderReelFile(input: {
   bedTrack?: string | null;
 }) {
   ensureDataDirs();
-  const photoPath = resolvePhotoFile(input.photoFile);
+  const photoPath =
+    input.photoPath && fs.existsSync(input.photoPath) ? input.photoPath : resolvePhotoFile(input.photoFile);
   if (!photoPath) {
-    throw new Error("The still for this reel is missing.");
+    throw new Error(STILL_GONE);
   }
 
   const duration = Math.min(12, Math.max(8, Math.round(input.durationSec)));
@@ -314,7 +318,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Line,Noto Serif,${size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,6,2,8,72,72,176,1
+Style: Line,Noto Serif,${size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,6,2,8,72,72,260,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

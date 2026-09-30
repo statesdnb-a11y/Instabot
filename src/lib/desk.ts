@@ -4,10 +4,11 @@ import { captionUsedOnCard, learnLine, rememberCaption } from "@/lib/captions";
 import { getReel, listReels, patchReel, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
-import { onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
-import { PHOTO_DIR, RENDER_DIR } from "@/lib/paths";
+import { isPublicBlobUrl, onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
+import { PHOTO_DIR, RENDER_DIR, resolvePhotoFile } from "@/lib/paths";
 import { publishApprovedNow } from "@/lib/publish";
 import { DRAFT_TARGET, fillQueue, markForRender } from "@/lib/queue";
+import { STILL_GONE } from "@/lib/render";
 import type { CatalogTrack, DeskPayload, Motion, ReelDTO } from "@/lib/types";
 import { bedTrackById } from "@/lib/tracks";
 import { nextLine } from "@/lib/voice";
@@ -85,6 +86,7 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
     postState: row.post_state,
     postError: row.post_error,
     igMediaId: row.ig_media_id,
+    stillMissing: reelStillMissing(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvedAt: row.approved_at,
@@ -136,6 +138,7 @@ export async function updateDraft(
     ? cleanText(input.caption ?? reel.caption, MAX_CAPTION, "The caption")
     : line;
   const lineChanged = line !== reel.line;
+  if (lineChanged && reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
   await patchReel(id, {
     line,
     caption,
@@ -143,7 +146,7 @@ export async function updateDraft(
     updated_at: Date.now(),
   });
   if (lineChanged) {
-    await markForRender(id);
+    await rerenderOrRestore(id, reel);
     await learnLine(line);
   }
   const next = await getReel(id);
@@ -179,13 +182,14 @@ export async function setAudio(id: string, audio: unknown) {
 
 export async function regenerateLine(id: string) {
   const reel = await requireDraft(id);
+  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
   const line = await nextLine([reel.line]);
   await patchReel(id, {
     line,
     caption: reel.caption_custom ? reel.caption : line,
     updated_at: Date.now(),
   });
-  await markForRender(id);
+  await rerenderOrRestore(id, reel);
   const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
@@ -193,9 +197,10 @@ export async function regenerateLine(id: string) {
 
 export async function regenerateMotion(id: string) {
   const reel = await requireDraft(id);
+  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
   const motion: Motion = reel.motion === "zoom" ? "pan" : "zoom";
   await patchReel(id, { motion, updated_at: Date.now() });
-  await markForRender(id);
+  await rerenderOrRestore(id, reel);
   const next = await getReel(id);
   if (!next) throw new DeskError("That reel is no longer on the desk.", 404);
   return toReelDTO(next);
@@ -203,6 +208,7 @@ export async function regenerateMotion(id: string) {
 
 export async function retryRender(id: string) {
   const reel = await requireDraft(id);
+  if (reelStillMissing(reel)) throw new DeskError(STILL_GONE, 409);
   if (reel.render_status === "rendering" || reel.render_status === "pending") {
     return toReelDTO(reel);
   }
@@ -266,6 +272,35 @@ export async function retryPublish(id: string) {
   if (!reel) throw new DeskError("That reel is no longer on the desk.", 404);
   if (reel.status !== "approved") throw new DeskError("Only an approved reel can be posted again.", 409);
   return finishPublish(id);
+}
+
+function reelStillMissing(row: ReelRow) {
+  if (row.still_url && isPublicBlobUrl(row.still_url)) return false;
+  return !resolvePhotoFile(row.photo_file);
+}
+
+async function rerenderOrRestore(id: string, previous: ReelRow) {
+  try {
+    await markForRender(id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : STILL_GONE;
+    if (message !== STILL_GONE) throw error;
+    await patchReel(id, {
+      line: previous.line,
+      caption: previous.caption,
+      caption_custom: previous.caption_custom,
+      motion: previous.motion,
+      render_status: previous.render_status,
+      render_error: STILL_GONE,
+      render_nonce: previous.render_nonce,
+      video_path: previous.video_path,
+      rendered_line: previous.rendered_line,
+      rendered_motion: previous.rendered_motion,
+      rendered_at: previous.rendered_at,
+      updated_at: Date.now(),
+    });
+    throw new DeskError(STILL_GONE, 409);
+  }
 }
 
 function insideDir(filePath: string, dir: string) {

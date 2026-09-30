@@ -377,7 +377,9 @@ function ReelCard({
           />
         )}
 
-        {reel.renderError ? (
+        {reel.stillMissing ? (
+          <p className="text-sm text-destructive">This reel&apos;s still is already gone.</p>
+        ) : reel.renderError ? (
           <p className="text-sm text-destructive">{reel.renderError}</p>
         ) : null}
         {reel.postError ? <p className="text-sm text-destructive">{reel.postError}</p> : null}
@@ -396,7 +398,7 @@ function ReelCard({
               <Button
                 variant="outline"
                 className="h-11"
-                disabled={Boolean(working)}
+                disabled={Boolean(working) || reel.stillMissing}
                 onClick={() => void run("line", { action: "regenerate-line" })}
               >
                 {working === "line" ? "Writing…" : "New line"}
@@ -404,12 +406,12 @@ function ReelCard({
               <Button
                 variant="outline"
                 className="h-11"
-                disabled={Boolean(working)}
+                disabled={Boolean(working) || reel.stillMissing}
                 onClick={() => void run("motion", { action: "regenerate-motion" })}
               >
                 {working === "motion" ? "Recutting…" : "New motion"}
               </Button>
-              {reel.renderStatus === "error" ? (
+              {reel.renderStatus === "error" && !reel.stillMissing ? (
                 <Button
                   variant="outline"
                   className="h-11"
@@ -682,13 +684,16 @@ function EditLine({
               />
             </div>
           ) : null}
+          {reel.stillMissing ? (
+            <p className="text-sm text-destructive">This reel&apos;s still is already gone.</p>
+          ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={() => void save()} disabled={busy || (!lineChanged && !captionChanged)}>
+          <Button onClick={() => void save()} disabled={busy || (!lineChanged && !captionChanged) || (reel.stillMissing && lineChanged)}>
             {busy ? "Saving…" : lineChanged ? "Save and re-render" : "Save caption"}
           </Button>
         </DialogFooter>

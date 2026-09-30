@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { attachMissingBedAudio } from "@/lib/bed";
 import {
   countDrafts,
@@ -12,16 +13,19 @@ import {
   type ReelRow,
 } from "@/lib/db";
 import {
+  blobEnabled,
+  isPublicBlobUrl,
   onVercel,
   removeStoredVideo,
   renderOutputPath,
   safeMediaError,
   saveRenderedMp4,
+  saveStillJpeg,
 } from "@/lib/media";
-import { ensureDataDirs } from "@/lib/paths";
+import { PHOTO_DIR, ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
 import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
-import { renderReelFile } from "@/lib/render";
+import { STILL_GONE, renderReelFile } from "@/lib/render";
 import { bedTrackById, pickBedTrack } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
@@ -64,6 +68,7 @@ export async function createDraft() {
     photo_license: photo.license,
     photo_license_url: photo.licenseUrl,
     photo_file: photo.file,
+    still_url: publicStillUrl(photo.imageUrl),
     audio_id: null,
     audio_title: null,
     audio_artist: null,
@@ -119,6 +124,7 @@ export async function createStudioReel(input: {
     photo_license: photo.license,
     photo_license_url: photo.licenseUrl,
     photo_file: photo.file,
+    still_url: publicStillUrl(photo.imageUrl),
     audio_id: null,
     audio_title: null,
     audio_artist: null,
@@ -183,9 +189,13 @@ export async function renderOne(id: string) {
 
   const outputPath = renderOutputPath(id, nonce);
   let removedPrevious = false;
+  let temporaryStill: string | null = null;
   try {
+    const still = await materializeReelStill(reel);
+    temporaryStill = still.temporary ? still.path : null;
     await renderReelFile({
       photoFile: reel.photo_file,
+      photoPath: still.path,
       line: reel.line,
       motion: reel.motion,
       durationSec: reel.duration_sec,
@@ -227,7 +237,44 @@ export async function renderOne(id: string) {
       updated_at: Date.now(),
     });
     throw new Error(message);
+  } finally {
+    if (temporaryStill) fs.rmSync(temporaryStill, { force: true });
   }
+}
+
+function publicStillUrl(value: string | undefined) {
+  return value && isPublicBlobUrl(value) ? value : null;
+}
+
+function bundledStill(file: string) {
+  const root = path.resolve(PHOTO_DIR);
+  const resolved = path.resolve(file);
+  return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+}
+
+async function materializeReelStill(reel: ReelRow) {
+  if (reel.still_url && isPublicBlobUrl(reel.still_url)) {
+    const response = await fetch(reel.still_url, { signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw new Error(STILL_GONE);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 8000 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error(STILL_GONE);
+    const dest = path.join(path.dirname(renderOutputPath(reel.id, reel.render_nonce)), `still-${reel.id}.jpg`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, bytes);
+    return { path: dest, temporary: true };
+  }
+
+  const local = resolvePhotoFile(reel.photo_file);
+  if (!local) throw new Error(STILL_GONE);
+  if (blobEnabled()) {
+    const imageUrl = await saveStillJpeg(reel.photo_id, fs.readFileSync(local)).catch(() => null);
+    if (imageUrl) {
+      await patchReel(reel.id, { still_url: imageUrl, updated_at: Date.now() });
+    } else if (onVercel() && !bundledStill(local)) {
+      throw new Error("The still could not be stored for a later edit.");
+    }
+  }
+  return { path: local, temporary: false };
 }
 
 export async function markForRender(id: string) {

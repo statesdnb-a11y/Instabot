@@ -18,6 +18,7 @@ export type ReelRow = {
   photo_license: string;
   photo_license_url: string;
   photo_file: string;
+  still_url: string | null;
   audio_id: string | null;
   audio_title: string | null;
   audio_artist: string | null;
@@ -70,6 +71,7 @@ async function openDatabase() {
       photo_license TEXT NOT NULL,
       photo_license_url TEXT NOT NULL,
       photo_file TEXT NOT NULL,
+      still_url TEXT,
       audio_id TEXT,
       audio_title TEXT,
       audio_artist TEXT,
@@ -105,6 +107,9 @@ async function openDatabase() {
   if (reelColumns.length > 0 && !reelColumns.some((column) => column.name === "bed_track")) {
     await db.exec("ALTER TABLE reels ADD COLUMN bed_track TEXT");
   }
+  if (reelColumns.length > 0 && !reelColumns.some((column) => column.name === "still_url")) {
+    await db.exec("ALTER TABLE reels ADD COLUMN still_url TEXT");
+  }
   const hadCaptions = await db.get(
     "SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = 'caption_templates'",
   );
@@ -128,6 +133,10 @@ async function openDatabase() {
     CREATE TABLE IF NOT EXISTS used_captions (
       caption_key TEXT PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS instagram_connection (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       access_token TEXT NOT NULL,
@@ -136,7 +145,23 @@ async function openDatabase() {
       connected_at INTEGER NOT NULL
     );
   `);
+  await forgetApprovedHistory(db);
   return db;
+}
+
+/** One-shot on the next open so a Vercel deploy clears live Turso without a token here. */
+async function forgetApprovedHistory(db: Sql) {
+  const done = await db.get<{ value: string }>("SELECT value FROM app_meta WHERE key = ?", "forget_used_lines_v1");
+  if (done) return;
+  await db.run("DELETE FROM used_captions");
+  const approved = await db.all<{ id: string; video_path: string | null }>(
+    "SELECT id, video_path FROM reels WHERE status = 'approved'",
+  );
+  for (const row of approved) {
+    await removeStoredVideo(row.video_path).catch(() => undefined);
+    await db.run("DELETE FROM reels WHERE id = ?", row.id);
+  }
+  await db.run("INSERT INTO app_meta (key, value) VALUES (?, ?)", "forget_used_lines_v1", "1");
 }
 
 const SEED_TEMPLATES = [
@@ -335,14 +360,14 @@ export async function insertReel(row: ReelRow) {
   await db.run(
     `INSERT INTO reels (
       id, status, line, caption, caption_custom,
-      photo_id, photo_author, photo_username, photo_source_url, photo_license, photo_license_url, photo_file,
+      photo_id, photo_author, photo_username, photo_source_url, photo_license, photo_license_url, photo_file, still_url,
       audio_id, audio_title, audio_artist, audio_artwork_url, audio_preview_url, audio_duration_ms,
       motion, duration_sec, video_path, render_status, render_error, render_nonce,
       rendered_line, rendered_motion, rendered_at,
       post_state, post_error, ig_media_id, bed_track, created_at, updated_at, approved_at, posted_at
     ) VALUES (
       @id, @status, @line, @caption, @caption_custom,
-      @photo_id, @photo_author, @photo_username, @photo_source_url, @photo_license, @photo_license_url, @photo_file,
+      @photo_id, @photo_author, @photo_username, @photo_source_url, @photo_license, @photo_license_url, @photo_file, @still_url,
       @audio_id, @audio_title, @audio_artist, @audio_artwork_url, @audio_preview_url, @audio_duration_ms,
       @motion, @duration_sec, @video_path, @render_status, @render_error, @render_nonce,
       @rendered_line, @rendered_motion, @rendered_at,

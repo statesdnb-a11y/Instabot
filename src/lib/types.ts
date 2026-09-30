@@ -42,6 +42,7 @@ export type ReelDTO = {
   postState: PostState;
   postError: string | null;
   igMediaId: string | null;
+  stillMissing: boolean;
   createdAt: number;
   updatedAt: number;
   approvedAt: number | null;
