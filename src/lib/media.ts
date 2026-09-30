@@ -4,7 +4,13 @@ import { del, put } from "@vercel/blob";
 import { RENDER_DIR } from "@/lib/paths";
 
 export function blobEnabled() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.instabot_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function blobAuth(): { storeId: string } | { token: string } {
+  const storeId = process.env.instabot_STORE_ID;
+  if (storeId) return { storeId };
+  return { token: process.env.BLOB_READ_WRITE_TOKEN ?? "" };
 }
 
 export function onVercel() {
@@ -27,7 +33,7 @@ export async function removeStoredVideo(stored: string | null) {
   if (!stored) return;
   if (stored.startsWith("https://")) {
     if (!blobEnabled()) return;
-    await del(stored, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    await del(stored, blobAuth());
     return;
   }
   if (insideRenderDir(stored) && fs.existsSync(stored)) {
@@ -43,7 +49,7 @@ export async function saveRenderedMp4(localPath: string, name: string) {
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "video/mp4",
-    token: process.env.BLOB_READ_WRITE_TOKEN,
+    ...blobAuth(),
   });
   await fs.promises.rm(localPath, { force: true });
   return blob.url;
