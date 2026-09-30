@@ -6,6 +6,10 @@ export const BED_TRACKS = [
   { id: "music-2", label: "Music 2", file: "music-2.m4a" },
   { id: "music-3", label: "Music 3", file: "music-3.m4a" },
   { id: "music-4", label: "Music 4", file: "music-4.m4a" },
+  { id: "music-5", label: "Music 5", file: "music-5.m4a" },
+  { id: "music-6", label: "Music 6", file: "music-6.m4a" },
+  { id: "music-7", label: "Music 7", file: "music-7.m4a" },
+  { id: "music-8", label: "Music 8", file: "music-8.m4a" },
 ] as const;
 
 export type BedTrackId = (typeof BED_TRACKS)[number]["id"];

@@ -1,6 +1,6 @@
 # Instabot
 
-A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short vertical reel with Music 1, Music 2, Music 3, or Music 4 mixed into the file.
+A personal Instagram Reels desk. You only approve. The app picks a two-person still, fills a line from your caption templates, and cuts a short vertical reel with Music 1 through Music 8 mixed into the file.
 
 ## Run it locally
 
@@ -71,21 +71,21 @@ New reels search Pexels when Creator refreshes or Generate adds a draft. Each pu
 
 On Vercel each new still is stored in the public Blob store. The Creator thumbnail URL is `https://<store>.public.blob.vercel-storage.com/stills/<photo-id>.jpg`, so a later request on another instance still returns the JPEG. Locally the thumbnail stays `/api/stills/<photo-id>`. Creator has a Back control that returns to Drafts.
 
-Creator is a button in the header. It opens the still picker. New stills runs another search. Pick a still and Music 1, Music 2, Music 3, or Music 4. Generate a caption from the templates and word banks, or type one. Each generated line picks a template and words at random, and it will not repeat the line already in the box. Duplicate templates and bank words are removed when the caption list opens. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
+Creator is a button in the header. It opens the still picker. New stills runs another search. Pick a still and Music 1 through Music 8. Generate a caption from the templates and word banks, or type one. Each generated line picks a template and words at random, and it will not repeat the line already in the box. Duplicate templates and bank words are removed when the caption list opens. The text in the box is burned into the reel, which lands in Drafts. Existing drafts and approved reels are left as they are.
 
 ## Music
 
-Music 1, Music 2, Music 3, and Music 4 live in `assets/music`. Each new reel picks one at random and mixes it into the mp4, looped or trimmed to the reel length. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.
+Music 1 through Music 8 live in `assets/music`. Each new reel picks one at random and mixes it into the mp4, looped or trimmed to the reel length. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.
 
 Search is `GET https://graph.facebook.com/v22.0/ig_audio?audio_type=music&user_id={ig-user-id}`. Omit `search_query` for trending; the portal search box sends it. On publish, `POST /{ig-user-id}/media` includes `media_type=REELS` and `audio_configuration={"audio_id":"...","audio_volume":100,"video_volume":0}`.
 
 A browser `<audio>` element may play the temporary preview URL. That URL is not saved as a file and is not muxed into the reel. Meta does not support previewing the published reel with the attached audio.
 
-Without a stored login or both `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works and approving does not post. The mp4 still has its Music 1, Music 2, Music 3, or Music 4 track.
+Without a stored login or both `IG_ACCESS_TOKEN` and `IG_USER_ID`, the queue still works and approving does not post. The mp4 still has its Music 1 through Music 8 track.
 
 ## Posting to Instagram
 
-Approve publishes immediately. For a reel with Music 1, Music 2, Music 3, or Music 4, it uploads that mp4 and does not send `audio_configuration`. The file’s audio is what Instagram keeps. A reel with no bed track still uses the catalog path: `audio_configuration` with `video_volume` 0. Then `media_publish` is called with `creation_id` only.
+Approve publishes immediately. For a reel with Music 1 through Music 8, it uploads that mp4 and does not send `audio_configuration`. The file’s audio is what Instagram keeps. A reel with no bed track still uses the catalog path: `audio_configuration` with `video_volume` 0. Then `media_publish` is called with `creation_id` only.
 
 `media_publish` has no schedule time. This desk does not call Facebook Page `scheduled_publish_time`. That is a different product. There is no 8-hour timer and no cron.
 

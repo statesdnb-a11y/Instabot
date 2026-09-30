@@ -9,6 +9,10 @@ const MUSIC = [
   { id: "music-2", label: "Music 2" },
   { id: "music-3", label: "Music 3" },
   { id: "music-4", label: "Music 4" },
+  { id: "music-5", label: "Music 5" },
+  { id: "music-6", label: "Music 6" },
+  { id: "music-7", label: "Music 7" },
+  { id: "music-8", label: "Music 8" },
 ] as const;
 
 type Still = {
@@ -145,7 +149,7 @@ export function Creator({ onCreated, onBack }: { onCreated: () => Promise<void>;
         <div className="max-w-xl">
           <h2 className="font-serif text-2xl">Creator</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one, choose Music 1, Music 2, Music 3, or Music 4, and burn in a line.
+            A new search each time{searchQuery ? `: ${searchQuery}` : ""}. One photo per photographer. Pick one, choose Music 1 through Music 8, and burn in a line.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -145,7 +145,7 @@ export function Portal({
             <p className="text-xs tracking-[0.22em] text-muted-foreground uppercase">Reels desk</p>
             <h1 className="mt-2 font-serif text-4xl tracking-tight sm:text-5xl">stockimgcouplegoals</h1>
             <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
-              You only approve. New reels and the ones already on the desk play Music 1, Music 2, Music 3, or Music 4 from the file.
+              You only approve. New reels and the ones already on the desk play Music 1 through Music 8 from the file.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -199,7 +199,7 @@ export function Portal({
             {drafts.length === 0 ? (
               <Empty
                 title="The desk is clear."
-                body="Generate a reel and it will land here with a line, a still, and Music 1, Music 2, Music 3, or Music 4 in the file."
+                body="Generate a reel and it will land here with a line, a still, and Music 1 through Music 8 in the file."
                 action={
                   <Button className="h-11" onClick={() => void generate()} disabled={generating}>
                     Generate
@@ -378,7 +378,7 @@ function ReelCard({
         )}
 
         {reel.stillMissing ? (
-          <p className="text-sm text-destructive">This reel's still is already gone.</p>
+          <p className="text-sm text-destructive">{"This reel's still is already gone."}</p>
         ) : reel.renderError ? (
           <p className="text-sm text-destructive">{reel.renderError}</p>
         ) : null}
@@ -685,7 +685,7 @@ function EditLine({
             </div>
           ) : null}
           {reel.stillMissing ? (
-            <p className="text-sm text-destructive">This reel's still is already gone.</p>
+            <p className="text-sm text-destructive">{"This reel's still is already gone."}</p>
           ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
