@@ -101,7 +101,7 @@ export async function createStudioReel(input: {
   const photo = findPhoto(input.photoId);
   if (!photo) throw new CaptionError("Pick one of the white-studio stills.");
   const track = bedTrackById(input.bedTrack);
-  if (!track) throw new CaptionError("Pick Music 1, Music 2, or Music 3.");
+  if (!track) throw new CaptionError("Pick Music 1, Music 2, Music 3, or Music 4.");
   const caption = input.caption.trim();
   if (!caption) throw new CaptionError("Write a caption, or generate one.");
   if (caption.length > 220) throw new CaptionError("That caption is too long.");
