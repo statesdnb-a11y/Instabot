@@ -15,6 +15,23 @@ export const BED_TRACKS = [
 
 export type BedTrackId = (typeof BED_TRACKS)[number]["id"];
 
+const RARE_BEDS = new Set<string>(["music-1", "music-2", "music-4"]);
+
+/** Automatic rotation. Rare beds are half as often as the others. */
+export function bedTrackWeight(id: string) {
+  return RARE_BEDS.has(id) ? 1 : 2;
+}
+
+export function nextWeightedBed(remaining: ReadonlyMap<string, number>, avoid: string | null) {
+  const start = avoid ? BED_TRACKS.findIndex((track) => track.id === avoid) : -1;
+  for (let step = 1; step <= BED_TRACKS.length; step += 1) {
+    const track = BED_TRACKS[(start + step) % BED_TRACKS.length];
+    if (!track || track.id === avoid) continue;
+    if ((remaining.get(track.id) ?? 0) > 0) return track;
+  }
+  return null;
+}
+
 export function pickBedTrack() {
   return BED_TRACKS[Math.floor(Math.random() * BED_TRACKS.length)];
 }

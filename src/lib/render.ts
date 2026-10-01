@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { bedTrackPath } from "@/lib/tracks";
@@ -128,8 +130,94 @@ function runFfmpeg(args: string[]) {
   });
 }
 
+export const BED_CROSSFADE_SEC = 1;
+
+function mediaDurationSec(filePath: string) {
+  return new Promise<number>((resolve, reject) => {
+    const child = spawn(ffmpegBin(), ["-hide_banner", "-i", filePath, "-f", "null", "-"], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => reject(error));
+    child.on("close", () => {
+      const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      if (!match) {
+        reject(new Error("Could not read the music length."));
+        return;
+      }
+      resolve(Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]));
+    });
+  });
+}
+
+function loopCopies(sourceSec: number, targetSec: number, fadeSec: number) {
+  let copies = 1;
+  while (copies < 8) {
+    const spanned = copies * sourceSec - Math.max(0, copies - 1) * fadeSec;
+    if (spanned >= targetSec - 0.02) return copies;
+    copies += 1;
+  }
+  return copies;
+}
+
+function crossfadeFilter(copies: number, fade: number, target: number) {
+  const fadeArg = fade.toFixed(3);
+  const targetArg = target.toFixed(3);
+  const parts: string[] = [];
+  let prev = "[0:a]";
+  for (let i = 1; i < copies; i += 1) {
+    const out = i === copies - 1 ? "[xf]" : `[xf${i}]`;
+    parts.push(`${prev}[${i}:a]acrossfade=d=${fadeArg}:c1=qsin:c2=qsin${out}`);
+    prev = out;
+  }
+  parts.push(`[xf]atrim=0:${targetArg},asetpts=PTS-STARTPTS[a]`);
+  return parts.join(";");
+}
+
+export async function prepareReelBed(audioPath: string, targetSec: number) {
+  const sourceSec = await mediaDurationSec(audioPath);
+  if (sourceSec >= targetSec - 0.05) return { path: audioPath, temporary: false, looped: false };
+  const fade = BED_CROSSFADE_SEC;
+  const copies = loopCopies(sourceSec, targetSec, fade);
+  const out = path.join(os.tmpdir(), `instabot-bed-${crypto.randomUUID()}.m4a`);
+  const inputs: string[] = [];
+  for (let i = 0; i < copies; i += 1) inputs.push("-i", audioPath);
+  try {
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      ...inputs,
+      "-filter_complex",
+      crossfadeFilter(copies, fade, targetSec),
+      "-map",
+      "[a]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      "-t",
+      String(targetSec),
+      out,
+    ]);
+    return { path: out, temporary: true, looped: true };
+  } catch (error) {
+    fs.rmSync(out, { force: true });
+    throw error;
+  }
+}
+
 export async function muxBedAudio(videoPath: string, bedTrack: string, outputPath: string) {
   const audioPath = bedTrackPath(bedTrack);
+  const bed = await prepareReelBed(audioPath, 15);
   const partial = `${outputPath}.part.mp4`;
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   try {
@@ -140,10 +228,8 @@ export async function muxBedAudio(videoPath: string, bedTrack: string, outputPat
       "error",
       "-i",
       videoPath,
-      "-stream_loop",
-      "-1",
       "-i",
-      audioPath,
+      bed.path,
       "-map",
       "0:v:0",
       "-map",
@@ -170,6 +256,8 @@ export async function muxBedAudio(videoPath: string, bedTrack: string, outputPat
   } catch (error) {
     fs.rmSync(partial, { force: true });
     throw error;
+  } finally {
+    if (bed.temporary) fs.rmSync(bed.path, { force: true });
   }
 }
 
@@ -226,7 +314,9 @@ export async function renderReelFile(input: {
   const audioPath = input.bedTrack ? bedTrackPath(input.bedTrack) : null;
   const partial = `${input.outputPath}.part.mp4`;
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
+  let bed: { path: string; temporary: boolean } | null = null;
   try {
+    if (audioPath) bed = await prepareReelBed(audioPath, duration);
     await runFfmpeg([
       "-y",
       "-hide_banner",
@@ -238,12 +328,12 @@ export async function renderReelFile(input: {
       String(FPS),
       "-i",
       photoPath,
-      ...(audioPath ? ["-stream_loop", "-1", "-i", audioPath] : []),
+      ...(bed ? ["-i", bed.path] : []),
       "-filter_complex",
       video,
       "-map",
       "[v]",
-      ...(audioPath ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2"] : ["-an"]),
+      ...(bed ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2"] : ["-an"]),
       "-t",
       String(duration),
       "-r",
@@ -270,6 +360,7 @@ export async function renderReelFile(input: {
     throw error;
   } finally {
     fs.rmSync(assPath, { force: true });
+    if (bed?.temporary) fs.rmSync(bed.path, { force: true });
   }
 }
 

@@ -75,7 +75,7 @@ Creator is a button in the header. It opens the still picker. New stills runs an
 
 ## Music
 
-Music 1 through Music 9 live in `assets/music`. Each new reel, Creator reel, and Change music click takes the next unused track and mixes it into the mp4, looped or trimmed to the reel length. Used tracks are stored in the database. After Music 9, the rotation starts again at Music 1. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.
+Music 1 through Music 9 live in `assets/music`. Automatic picks (new reels and Change music) read weights stored in the database: Music 1, Music 2, and Music 4 are chosen half as often as Music 3, 5, 6, 7, 8, and 9. A track chosen by hand is the one that renders. A bed shorter than the reel loops with a one-second crossfade at the join. A longer bed is trimmed, with no extra loop. On startup the desk does the same for drafts and approved reels that do not have a track yet, including files already stored in Blob, so play on the live desk hears that audio. Publish uploads the file’s own audio. It does not send a catalog `audio_id` and does not set `video_volume` to 0 for those reels.
 
 Search is `GET https://graph.facebook.com/v22.0/ig_audio?audio_type=music&user_id={ig-user-id}`. Omit `search_query` for trending; the portal search box sends it. On publish, `POST /{ig-user-id}/media` includes `media_type=REELS` and `audio_configuration={"audio_id":"...","audio_volume":100,"video_volume":0}`.
 

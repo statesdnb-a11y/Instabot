@@ -3,7 +3,7 @@ import path from "node:path";
 import { removeStoredVideo } from "@/lib/media";
 import { RENDER_DIR } from "@/lib/paths";
 import { openSql, tursoEnabled, type Sql } from "@/lib/sql";
-import { BED_TRACKS } from "@/lib/tracks";
+import { BED_TRACKS, bedTrackWeight, nextWeightedBed } from "@/lib/tracks";
 import type { Motion, PostState, ReelStatus, RenderStatus } from "@/lib/types";
 
 export type ReelRow = {
@@ -152,6 +152,14 @@ async function openDatabase() {
       track_id TEXT PRIMARY KEY,
       used_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS bed_track_weights (
+      track_id TEXT PRIMARY KEY,
+      weight INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bed_pick_remaining (
+      track_id TEXT PRIMARY KEY,
+      remaining INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS shown_stills (
       photo_id TEXT PRIMARY KEY,
       username TEXT NOT NULL,
@@ -167,6 +175,7 @@ async function openDatabase() {
   `);
   await rememberReelsAsShown(db);
   await forgetApprovedHistory(db);
+  await ensureBedRotation(db);
   return db;
 }
 
@@ -487,67 +496,151 @@ export async function rememberShownStill(photoId: string, username: string) {
   );
 }
 
-export type BedTrackTake = { id: string; cleared: string[] };
+export type BedTrackTake = {
+  id: string;
+  remainingBefore: { track_id: string; remaining: number }[];
+  lastBefore: string | null;
+};
 
 async function usedBedIds(db: Sql) {
   const rows = await db.all<{ track_id: string }>("SELECT track_id FROM used_bed_tracks");
   return rows.map((row) => row.track_id);
 }
 
-function nextUnusedBed(used: Set<string>, avoid: string | null) {
-  const start = avoid ? BED_TRACKS.findIndex((track) => track.id === avoid) : -1;
-  for (let step = 1; step <= BED_TRACKS.length; step += 1) {
-    const track = BED_TRACKS[(start + step) % BED_TRACKS.length];
-    if (!track || used.has(track.id) || track.id === avoid) continue;
-    return track;
+async function ensureBedRotation(db: Sql) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS bed_track_weights (
+      track_id TEXT PRIMARY KEY,
+      weight INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bed_pick_remaining (
+      track_id TEXT PRIMARY KEY,
+      remaining INTEGER NOT NULL
+    );
+  `);
+  for (const track of BED_TRACKS) {
+    await db.run(
+      `INSERT INTO bed_track_weights (track_id, weight) VALUES (?, ?)
+       ON CONFLICT(track_id) DO UPDATE SET weight = excluded.weight`,
+      track.id,
+      bedTrackWeight(track.id),
+    );
   }
-  return null;
+  const count = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM bed_pick_remaining");
+  if (count && count.n > 0) return;
+  const used = new Set(await usedBedIds(db));
+  const cycleDone = used.size > 0 && BED_TRACKS.every((track) => used.has(track.id));
+  for (const track of BED_TRACKS) {
+    const weight = bedTrackWeight(track.id);
+    const remaining = !cycleDone && used.has(track.id) ? Math.max(0, weight - 1) : weight;
+    await db.run(
+      "INSERT INTO bed_pick_remaining (track_id, remaining) VALUES (?, ?)",
+      track.id,
+      remaining,
+    );
+  }
+}
+
+async function loadRemaining(db: Sql) {
+  await ensureBedRotation(db);
+  const rows = await db.all<{ track_id: string; remaining: number }>(
+    "SELECT track_id, remaining FROM bed_pick_remaining",
+  );
+  const remaining = new Map<string, number>();
+  for (const row of rows) remaining.set(row.track_id, row.remaining);
+  for (const track of BED_TRACKS) {
+    if (!remaining.has(track.id)) remaining.set(track.id, bedTrackWeight(track.id));
+  }
+  return remaining;
+}
+
+async function saveRemaining(db: Sql, remaining: ReadonlyMap<string, number>) {
+  for (const track of BED_TRACKS) {
+    await db.run(
+      `INSERT INTO bed_pick_remaining (track_id, remaining) VALUES (?, ?)
+       ON CONFLICT(track_id) DO UPDATE SET remaining = excluded.remaining`,
+      track.id,
+      remaining.get(track.id) ?? 0,
+    );
+  }
+}
+
+function snapshotRemaining(remaining: ReadonlyMap<string, number>) {
+  return BED_TRACKS.map((track) => ({
+    track_id: track.id,
+    remaining: remaining.get(track.id) ?? 0,
+  }));
+}
+
+async function freshRemaining(db: Sql) {
+  await ensureBedRotation(db);
+  const rows = await db.all<{ track_id: string; weight: number }>(
+    "SELECT track_id, weight FROM bed_track_weights",
+  );
+  const weights = new Map(rows.map((row) => [row.track_id, row.weight]));
+  const remaining = new Map<string, number>();
+  for (const track of BED_TRACKS) {
+    remaining.set(track.id, weights.get(track.id) ?? bedTrackWeight(track.id));
+  }
+  return remaining;
+}
+
+async function lastBedTrack(db: Sql) {
+  const row = await db.get<{ value: string }>("SELECT value FROM app_meta WHERE key = ?", "bed_last_track");
+  return row?.value ?? null;
+}
+
+async function setLastBedTrack(db: Sql, id: string) {
+  await db.run(
+    `INSERT INTO app_meta (key, value) VALUES ('bed_last_track', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    id,
+  );
 }
 
 export async function peekNextBedTrack() {
   const db = await getSql();
-  const used = new Set(await usedBedIds(db));
-  const next = nextUnusedBed(used, null) ?? BED_TRACKS[0];
+  const remaining = await loadRemaining(db);
+  const cursor = await lastBedTrack(db);
+  let next = nextWeightedBed(remaining, cursor);
+  if (!next) next = nextWeightedBed(await freshRemaining(db), cursor) ?? BED_TRACKS[0];
   return { id: next.id, label: next.label };
 }
 
 export async function takeNextBedTrack(avoid?: string | null): Promise<BedTrackTake> {
   const db = await getSql();
-  const existing = await usedBedIds(db);
-  const used = new Set(existing);
-  let cleared: string[] = [];
-  let next = nextUnusedBed(used, avoid ?? null);
+  const before = await loadRemaining(db);
+  const remainingBefore = snapshotRemaining(before);
+  const lastBefore = await lastBedTrack(db);
+  const cursor = avoid ?? lastBefore;
+  let remaining = new Map(before);
+  let next = nextWeightedBed(remaining, cursor);
   if (!next) {
-    cleared = existing;
-    await db.run("DELETE FROM used_bed_tracks");
-    next = nextUnusedBed(new Set(), avoid ?? null) ?? BED_TRACKS[0];
+    remaining = await freshRemaining(db);
+    next = nextWeightedBed(remaining, cursor) ?? BED_TRACKS.find((track) => track.id !== (cursor ?? "")) ?? BED_TRACKS[0];
   }
-  await db.run(
-    `INSERT INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)
-     ON CONFLICT(track_id) DO UPDATE SET used_at = excluded.used_at`,
-    next.id,
-    Date.now(),
-  );
-  return { id: next.id, cleared };
+  remaining.set(next.id, Math.max(0, (remaining.get(next.id) ?? 1) - 1));
+  await saveRemaining(db, remaining);
+  await setLastBedTrack(db, next.id);
+  return { id: next.id, remainingBefore, lastBefore };
 }
 
 export async function noteChosenBedTrack(trackId: string) {
   if (!BED_TRACKS.some((track) => track.id === trackId)) return;
   const db = await getSql();
-  await db.run(
-    `INSERT INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)
-     ON CONFLICT(track_id) DO UPDATE SET used_at = excluded.used_at`,
-    trackId,
-    Date.now(),
-  );
+  const remaining = await loadRemaining(db);
+  const left = remaining.get(trackId) ?? 0;
+  if (left <= 0) return;
+  remaining.set(trackId, left - 1);
+  await saveRemaining(db, remaining);
 }
 
 export async function undoBedTrackTake(take: BedTrackTake) {
   const db = await getSql();
-  await db.run("DELETE FROM used_bed_tracks WHERE track_id = ?", take.id);
-  for (const id of take.cleared) {
-    await db.run("INSERT OR IGNORE INTO used_bed_tracks (track_id, used_at) VALUES (?, ?)", id, Date.now());
-  }
+  const remaining = new Map(take.remainingBefore.map((row) => [row.track_id, row.remaining]));
+  await saveRemaining(db, remaining);
+  if (take.lastBefore) await setLastBedTrack(db, take.lastBefore);
+  else await db.run("DELETE FROM app_meta WHERE key = ?", "bed_last_track");
 }
 
 export async function claimBedTrack(id: string, trackId: string) {
