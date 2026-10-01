@@ -80,7 +80,7 @@ export async function createDraft() {
     audio_duration_ms: null,
     bed_track: (await takeNextBedTrack()).id,
     motion: await pickMotion(),
-    duration_sec: 8 + Math.floor(Math.random() * 5),
+    duration_sec: 15,
     video_path: null,
     render_status: "pending",
     render_error: null,
@@ -138,7 +138,7 @@ export async function createStudioReel(input: {
     audio_duration_ms: null,
     bed_track: track.id,
     motion: await pickMotion(),
-    duration_sec: 8 + Math.floor(Math.random() * 5),
+    duration_sec: 15,
     video_path: null,
     render_status: "pending",
     render_error: null,
@@ -203,7 +203,7 @@ export async function renderOne(id: string) {
       photoPath: still.path,
       line: reel.line,
       motion: reel.motion,
-      durationSec: reel.duration_sec,
+      durationSec: 15,
       outputPath,
       bedTrack: reel.bed_track,
     });
@@ -220,6 +220,7 @@ export async function renderOne(id: string) {
     const stored = await saveRenderedMp4(outputPath, `${id}-${nonce}.mp4`);
     await patchReel(id, {
       video_path: stored,
+      duration_sec: 15,
       render_status: "ready",
       render_error: null,
       rendered_line: current.line,

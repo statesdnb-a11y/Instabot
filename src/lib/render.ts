@@ -191,7 +191,7 @@ export async function renderReelFile(input: {
     throw new Error(STILL_GONE);
   }
 
-  const duration = Math.min(12, Math.max(8, Math.round(input.durationSec)));
+  const duration = 15;
   const frames = duration * FPS;
   const assPath = path.join(path.dirname(input.outputPath), `line-${path.basename(input.outputPath, ".mp4")}.ass`);
   fs.mkdirSync(path.dirname(assPath), { recursive: true });

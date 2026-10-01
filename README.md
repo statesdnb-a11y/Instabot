@@ -11,7 +11,7 @@ npm run dev
 
 The desk listens on [http://127.0.0.1:43123](http://127.0.0.1:43123) (`0.0.0.0:43123`). Rendering uses the `ffmpeg-static` binary bundled with the app, and falls back to `ffmpeg` on your PATH. The on-screen type is the bundled Noto Serif Italic in `assets/`.
 
-The first local launch fills five drafts and renders them one at a time in the background. Generate on this machine tops the queue back up to five and waits until each new file is written. A 10 second 1080×1920 cut usually takes a few seconds.
+The first local launch fills five drafts and renders them one at a time in the background. Generate on this machine tops the queue back up to five and waits until each new file is written. A 15 second 1080×1920 cut usually takes a few seconds.
 
 Copy `.env.example` to `.env.local` if you want a passphrase, Instagram publishing, or hosted storage. With nothing set, the desk is open and approving records the reel as not connected instead of posting. Connect Instagram stays at the top of the header. If `META_APP_ID`, `META_APP_SECRET`, or `META_REDIRECT_URI` is missing, the button stays there and names them.
 
@@ -27,7 +27,7 @@ There is no in-process timer and no Vercel cron. Approve publishes immediately.
 
 ## What a reel is
 
-- 1080×1920, H.264, no audio track, about 8–12 seconds, 30 fps
+- 1080×1920, H.264, no audio track, 15 seconds, 30 fps
 - Center-weighted 9:16 crop, then a slow zoom (1.0 → 1.08) or a slow pan that stays near the middle
 - One sentence burned near the top: large white type with a dark stroke and shadow on the letters
 - The same sentence stored as the Instagram caption, unless you split them
