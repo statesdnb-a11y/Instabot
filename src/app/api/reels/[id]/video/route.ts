@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { statSync } from "node:fs";
 import { Readable } from "node:stream";
-import { reelMedia } from "@/lib/desk";
+import { reelMedia } from "@/lib/reel-media";
 import { blobPlaybackRedirect, safeMediaError } from "@/lib/media";
 
 export const dynamic = "force-dynamic";

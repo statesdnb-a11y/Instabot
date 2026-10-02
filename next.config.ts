@@ -1,15 +1,19 @@
 import type { NextConfig } from "next";
 
-const traced = ["./data/photos/**/*", "./assets/**/*", "./node_modules/ffmpeg-static/**/*"];
+const ffmpegTrace = ["./node_modules/ffmpeg-static/**/*", "./assets/**/*"];
+const photoTrace = ["./data/photos/**/*"];
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "wink-pos-tagger", "ffmpeg-static", "@libsql/client"],
   allowedDevOrigins: ["127.0.0.1"],
   outputFileTracingIncludes: {
-    "/api/reels": traced,
-    "/api/reels/[id]": traced,
-    "/api/reels/[id]/poster": traced,
-    "/api/reels/[id]/video": traced,
+    "/api/reels": [...ffmpegTrace, ...photoTrace],
+    "/api/reels/[id]": [...ffmpegTrace, ...photoTrace],
+    "/api/reels/[id]/poster": photoTrace,
+  },
+  outputFileTracingExcludes: {
+    "/api/reels/[id]/poster": [...ffmpegTrace],
+    "/api/reels/[id]/video": [...ffmpegTrace, ...photoTrace],
   },
 };
 

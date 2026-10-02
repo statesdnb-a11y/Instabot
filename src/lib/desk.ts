@@ -1,11 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import { beginCaptionCooldown, captionUsedOnCard, deprioritizeCaption, learnLine, rememberCaption } from "@/lib/captions";
 import { getReel, listReels, noteChosenBedTrack, patchReel, takeNextBedTrack, undoBedTrackTake, type ReelRow } from "@/lib/db";
 import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
-import { isPublicBlobUrl, onVercel, presignedBlobReadUrl, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
-import { RENDER_DIR, resolvePhotoFile } from "@/lib/paths";
+import { isBlobUrl, onVercel, presignedBlobReadUrl, removeStoredVideo, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
 import { publishApprovedNow } from "@/lib/publish";
 import { DRAFT_TARGET, ensureReelStill, fillQueue, markForRender, stillIsMissing } from "@/lib/queue";
 import { STILL_GONE } from "@/lib/render";
@@ -269,9 +266,23 @@ export async function skipReel(id: string) {
     await deprioritizeCaption(reel.caption);
     await beginCaptionCooldown(reel.caption);
   }
-  await patchReel(id, { status: "skipped", updated_at: Date.now() });
+  const stillShared = (await listReels()).some((row) => row.id !== reel.id && sameStill(row, reel));
+  const dropStill = Boolean(reel.still_url) && !stillShared && isBlobUrl(reel.still_url ?? "");
+  await patchReel(id, {
+    status: "skipped",
+    video_path: null,
+    ...(dropStill ? { still_url: null } : {}),
+    updated_at: Date.now(),
+  });
+  await removeStoredVideo(reel.video_path);
+  if (dropStill) await removeStoredVideo(reel.still_url);
   if (!onVercel()) void fillQueue(0).catch(() => undefined);
   return { ok: true };
+}
+
+function sameStill(row: ReelRow, reel: ReelRow) {
+  if (reel.still_url && row.still_url === reel.still_url) return true;
+  return Boolean(reel.photo_id) && row.photo_id === reel.photo_id;
 }
 
 async function assertReadyToPost(reel: ReelRow) {
@@ -355,40 +366,4 @@ async function rerenderOrRestore(id: string, previous: ReelRow) {
     });
     throw new DeskError(STILL_GONE, 409);
   }
-}
-
-function insideDir(filePath: string, dir: string) {
-  const root = path.resolve(dir);
-  const resolved = path.resolve(filePath);
-  return resolved === root || resolved.startsWith(`${root}${path.sep}`);
-}
-
-export async function reelMedia(id: string, kind: "video" | "poster") {
-  const reel = await getReel(id);
-  if (!reel) return null;
-  if (kind === "poster") {
-    if (reel.still_url && isPublicBlobUrl(reel.still_url)) {
-      return { file: null, url: reel.still_url, type: "image/jpeg" as const, downloadName: null };
-    }
-    const file = resolvePhotoFile(reel.photo_file) ?? resolvePhotoFile(reel.still_url ?? "");
-    if (!file) return null;
-    return { file, url: null as string | null, type: "image/jpeg" as const, downloadName: null };
-  }
-  const stored = storedVideoKind(reel.video_path);
-  if (!reel.video_path || stored === "missing") return null;
-  if (stored === "public-blob" || stored === "private-blob") {
-    return {
-      file: null as string | null,
-      url: reel.video_path,
-      type: "video/mp4" as const,
-      downloadName: `instabot-${reel.id}.mp4`,
-    };
-  }
-  if (!insideDir(reel.video_path, RENDER_DIR) || !fs.existsSync(reel.video_path)) return null;
-  return {
-    file: reel.video_path,
-    url: null as string | null,
-    type: "video/mp4" as const,
-    downloadName: `instabot-${reel.id}.mp4`,
-  };
 }

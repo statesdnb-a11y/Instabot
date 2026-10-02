@@ -1,6 +1,6 @@
 import { createReadStream, statSync } from "node:fs";
 import { Readable } from "node:stream";
-import { reelMedia } from "@/lib/desk";
+import { reelMedia } from "@/lib/reel-media";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
