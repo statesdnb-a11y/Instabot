@@ -28,7 +28,7 @@ import {
 import { ensureDataDirs, resolvePhotoFile } from "@/lib/paths";
 import { CaptionError } from "@/lib/captions";
 import { findPhoto, takeStudioPhoto } from "@/lib/photo-search";
-import { STILL_GONE, renderReelFile } from "@/lib/render";
+import { RENDER_ABORTED, STILL_GONE, renderReelFile } from "@/lib/render";
 import { bedTrackById } from "@/lib/tracks";
 import type { Motion } from "@/lib/types";
 import { nextLine } from "@/lib/voice";
@@ -159,6 +159,7 @@ export async function createStudioReel(input: {
 }
 
 export function enqueueRender(id: string) {
+  if (onVercel()) return;
   queued().add(id);
   void pump();
 }
@@ -182,6 +183,18 @@ async function pump() {
   }
 }
 
+const RENDER_BUDGET_MS = 45_000;
+
+function untilAbort(signal: AbortSignal) {
+  return new Promise<never>((_, reject) => {
+    if (signal.aborted) {
+      reject(new Error(RENDER_ABORTED));
+      return;
+    }
+    signal.addEventListener("abort", () => reject(new Error(RENDER_ABORTED)), { once: true });
+  });
+}
+
 export async function renderOne(id: string) {
   const reel = await getReel(id);
   if (!reel || reel.status !== "draft") return;
@@ -195,10 +208,14 @@ export async function renderOne(id: string) {
   const outputPath = renderOutputPath(id, nonce);
   let removedPrevious = false;
   let temporaryStill: string | null = null;
+  const controller = onVercel() ? new AbortController() : null;
+  const budget = controller ? setTimeout(() => controller.abort(), RENDER_BUDGET_MS) : null;
   try {
-    const still = await materializeReelStill(reel);
+    const still = await (controller
+      ? Promise.race([materializeReelStill(reel), untilAbort(controller.signal)])
+      : materializeReelStill(reel));
     temporaryStill = still.temporary ? still.path : null;
-    await renderReelFile({
+    const cut = renderReelFile({
       photoFile: reel.photo_file,
       photoPath: still.path,
       line: reel.line,
@@ -206,7 +223,9 @@ export async function renderOne(id: string) {
       durationSec: 15,
       outputPath,
       bedTrack: reel.bed_track,
+      signal: controller?.signal,
     });
+    await (controller ? Promise.race([cut, untilAbort(controller.signal)]) : cut);
     const current = await getReel(id);
     if (!current || current.render_nonce !== nonce || current.status !== "draft") {
       fs.rmSync(outputPath, { force: true });
@@ -217,7 +236,8 @@ export async function renderOne(id: string) {
       removedPrevious = true;
       await removeStoredVideo(current.video_path);
     }
-    const stored = await saveRenderedMp4(outputPath, `${id}-${nonce}.mp4`);
+    const upload = saveRenderedMp4(outputPath, `${id}-${nonce}.mp4`);
+    const stored = await (controller ? Promise.race([upload, untilAbort(controller.signal)]) : upload);
     await patchReel(id, {
       video_path: stored,
       duration_sec: 15,
@@ -231,7 +251,10 @@ export async function renderOne(id: string) {
   } catch (error) {
     fs.rmSync(outputPath, { force: true });
     const current = await getReel(id);
-    const message = safeMediaError(error);
+    const message =
+      controller?.signal.aborted || (error instanceof Error && error.message === RENDER_ABORTED)
+        ? RENDER_ABORTED
+        : safeMediaError(error);
     if (!current || current.render_nonce !== nonce) {
       if (current?.status === "draft") enqueueRender(id);
       return;
@@ -244,6 +267,7 @@ export async function renderOne(id: string) {
     });
     throw new Error(message);
   } finally {
+    if (budget) clearTimeout(budget);
     if (temporaryStill) fs.rmSync(temporaryStill, { force: true });
   }
 }
@@ -399,15 +423,33 @@ export async function fillQueue(extra = 0) {
   return ids;
 }
 
+export const STUCK_RENDER_MS = 75_000;
+export const STUCK_RENDER_ERROR = "This cut stopped before it finished. Try the cut again.";
+
+export async function releaseStuckRenders() {
+  const db = await getSql();
+  const now = Date.now();
+  await db.run(
+    `UPDATE reels
+     SET render_status = 'error', render_error = ?, updated_at = ?
+     WHERE status = 'draft'
+       AND render_status IN ('pending', 'rendering')
+       AND updated_at <= ?`,
+    STUCK_RENDER_ERROR,
+    now,
+    now - STUCK_RENDER_MS,
+  );
+}
+
 async function runBoot() {
   ensureDataDirs();
   await purgePublished();
-  const db = await getSql();
-  await db.run("UPDATE reels SET render_status = 'pending' WHERE status = 'draft' AND render_status = 'rendering'");
+  await releaseStuckRenders();
   await attachMissingBedAudio();
   await rememberDeskStills();
   if (onVercel()) return;
   await createDrafts(0);
+  const db = await getSql();
   const pending = await db.all<{ id: string }>(
     "SELECT id FROM reels WHERE status = 'draft' AND render_status = 'pending'",
   );

@@ -4,7 +4,7 @@ import { instagramConnected } from "@/lib/instagram";
 import { instagramDesk } from "@/lib/meta";
 import { isBlobUrl, onVercel, presignedBlobReadUrl, removeStoredVideo, safeMediaError, storedVideoKind, videoExists } from "@/lib/media";
 import { publishApprovedNow } from "@/lib/publish";
-import { DRAFT_TARGET, ensureReelStill, fillQueue, markForRender, stillIsMissing } from "@/lib/queue";
+import { DRAFT_TARGET, ensureReelStill, fillQueue, markForRender, releaseStuckRenders, stillIsMissing } from "@/lib/queue";
 import { STILL_GONE } from "@/lib/render";
 import type { CatalogTrack, DeskPayload, Motion, ReelDTO } from "@/lib/types";
 import { bedTrackById } from "@/lib/tracks";
@@ -93,6 +93,7 @@ export async function toReelDTO(row: ReelRow): Promise<ReelDTO> {
 }
 
 export async function deskPayload(): Promise<DeskPayload> {
+  await releaseStuckRenders();
   const reels = await listReels();
   return {
     reels: await Promise.all(reels.map((row) => toReelDTO(row))),

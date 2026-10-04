@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -108,47 +108,81 @@ function layoutCaption(text: string) {
   return chosen;
 }
 
-function runFfmpeg(args: string[]) {
+export const RENDER_ABORTED = "The cut did not finish before this request ended.";
+
+function stopOnAbort(child: ChildProcess, signal: AbortSignal | undefined, reject: (error: Error) => void) {
+  if (!signal) return () => undefined;
+  const onAbort = () => {
+    child.kill("SIGKILL");
+    reject(new Error(RENDER_ABORTED));
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
+}
+
+function runFfmpeg(args: string[], signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(ffmpegBin(), args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      stop();
+      if (error) reject(error);
+      else resolve();
+    };
+    const stop = stopOnAbort(child, signal, (error) => finish(error));
+    if (signal?.aborted) {
+      child.kill("SIGKILL");
+      finish(new Error(RENDER_ABORTED));
+    }
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
       if (stderr.length > 12000) stderr = stderr.slice(-8000);
     });
     child.on("error", (error) => {
-      reject(
-        error.message.includes("ENOENT")
-          ? new Error("ffmpeg is not installed.")
-          : error,
-      );
+      finish(error.message.includes("ENOENT") ? new Error("ffmpeg is not installed.") : error);
     });
     child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr.trim().slice(-700) || `ffmpeg exited ${code}`));
+      if (code === 0) finish();
+      else finish(new Error(stderr.trim().slice(-700) || `ffmpeg exited ${code}`));
     });
   });
 }
 
 export const BED_CROSSFADE_SEC = 1;
 
-function mediaDurationSec(filePath: string) {
+function mediaDurationSec(filePath: string, signal?: AbortSignal) {
   return new Promise<number>((resolve, reject) => {
     const child = spawn(ffmpegBin(), ["-hide_banner", "-i", filePath, "-f", "null", "-"], {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let stderr = "";
+    let settled = false;
+    const finish = (error?: Error, seconds?: number) => {
+      if (settled) return;
+      settled = true;
+      stop();
+      if (error) reject(error);
+      else resolve(seconds ?? 0);
+    };
+    const stop = stopOnAbort(child, signal, (error) => finish(error));
+    if (signal?.aborted) {
+      child.kill("SIGKILL");
+      finish(new Error(RENDER_ABORTED));
+    }
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
-    child.on("error", (error) => reject(error));
+    child.on("error", (error) => finish(error));
     child.on("close", () => {
       const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
       if (!match) {
-        reject(new Error("Could not read the music length."));
+        finish(new Error("Could not read the music length."));
         return;
       }
-      resolve(Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]));
+      finish(undefined, Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]));
     });
   });
 }
@@ -177,8 +211,8 @@ function crossfadeFilter(copies: number, fade: number, target: number) {
   return parts.join(";");
 }
 
-export async function prepareReelBed(audioPath: string, targetSec: number) {
-  const sourceSec = await mediaDurationSec(audioPath);
+export async function prepareReelBed(audioPath: string, targetSec: number, signal?: AbortSignal) {
+  const sourceSec = await mediaDurationSec(audioPath, signal);
   if (sourceSec >= targetSec - 0.05) return { path: audioPath, temporary: false, looped: false };
   const fade = BED_CROSSFADE_SEC;
   const copies = loopCopies(sourceSec, targetSec, fade);
@@ -207,7 +241,7 @@ export async function prepareReelBed(audioPath: string, targetSec: number) {
       "-t",
       String(targetSec),
       out,
-    ]);
+    ], signal);
     return { path: out, temporary: true, looped: true };
   } catch (error) {
     fs.rmSync(out, { force: true });
@@ -217,7 +251,7 @@ export async function prepareReelBed(audioPath: string, targetSec: number) {
 
 export async function muxBedAudio(videoPath: string, bedTrack: string, outputPath: string) {
   const audioPath = bedTrackPath(bedTrack);
-  const bed = await prepareReelBed(audioPath, 15);
+  const bed = await prepareReelBed(audioPath, 15, undefined);
   const partial = `${outputPath}.part.mp4`;
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   try {
@@ -271,6 +305,7 @@ export async function renderReelFile(input: {
   durationSec: number;
   outputPath: string;
   bedTrack?: string | null;
+  signal?: AbortSignal;
 }) {
   ensureDataDirs();
   const photoPath =
@@ -316,7 +351,7 @@ export async function renderReelFile(input: {
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
   let bed: { path: string; temporary: boolean } | null = null;
   try {
-    if (audioPath) bed = await prepareReelBed(audioPath, duration);
+    if (audioPath) bed = await prepareReelBed(audioPath, duration, input.signal);
     await runFfmpeg([
       "-y",
       "-hide_banner",
@@ -349,7 +384,7 @@ export async function renderReelFile(input: {
       "-movflags",
       "+faststart",
       partial,
-    ]);
+    ], input.signal);
     const stat = fs.statSync(partial);
     if (stat.size < 1000 || !playableMp4(partial) || (audioPath && !(await fileHasAudio(partial)))) {
       throw new Error(audioPath ? "ffmpeg did not write the music into the mp4." : "ffmpeg did not write a playable mp4.");
