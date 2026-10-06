@@ -23,22 +23,32 @@ const TONES = [
   "grinning",
   "teasing",
 ];
-const WHO = ["couple", "young couple", "happy couple", "newlywed couple"];
+const WHO = [
+  "couple",
+  "young couple",
+  "happy couple",
+  "everyday couple",
+  "boyfriend and girlfriend",
+  "couple at home",
+];
 const DOING = [
   "making a funny face",
   "being silly together",
   "pulling faces",
   "sticking tongues out",
   "hugging and laughing",
-  "posing together",
   "joking around",
   "acting ridiculous",
   "grinning at the camera",
   "being playful",
   "crossing their eyes",
   "making silly faces",
+  "goofing off at home",
+  "laughing on the couch",
+  "being silly in the kitchen",
+  "making funny faces over coffee",
 ];
-const SHAPES = ["stock photo", "photo", "portrait", "candid", "picture", "snapshot"];
+const SHAPES = ["stock photo", "photo", "portrait", "candid", "picture", "snapshot", "everyday photo"];
 
 type Candidate = {
   id: string;
@@ -79,9 +89,9 @@ function sceneText(candidate: Pick<Candidate, "alt" | "slug">) {
 
 function usable(candidate: Pick<Candidate, "alt" | "slug">) {
   const text = sceneText(candidate);
-  const couple = /couple|bride|groom|newlywed|man and woman|two people/;
+  const couple = /couple|boyfriend and girlfriend|man and woman|two people/;
   const drop =
-    /outdoor|street|beach|\bpark\b|sunset|garden|motorcycle|\bbike\b|nature|forest|ocean|\blake\b|mountain|silhouette|museum|gallery|architecture|\bhorse\b|\bsnow\b|at night|dark background|monochrome|grayscale/;
+    /wedding|\bbride\b|\bgroom\b|bridal|ceremony|\baisle\b|\bveil\b|newlywed|outdoor|street|beach|\bpark\b|sunset|garden|motorcycle|\bbike\b|nature|forest|ocean|\blake\b|mountain|silhouette|museum|gallery|architecture|\bhorse\b|\bsnow\b|at night|dark background|monochrome|grayscale/;
   return couple.test(text) && !drop.test(text);
 }
 
